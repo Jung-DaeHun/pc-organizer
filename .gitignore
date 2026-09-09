@@ -1,0 +1,10 @@
+node_modules/
+out/
+dist/
+release/
+*.log
+.DS_Store
+.vite/
+
+# 개인 설정은 공유하지 않는다 (.claude/settings.json 은 팀 공유용이라 커밋한다)
+.claude/settings.local.json

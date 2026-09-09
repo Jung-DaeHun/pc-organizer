@@ -1,0 +1,132 @@
+@import 'tailwindcss';
+
+/* shadcn/ui 규약: .dark 를 조상에 두면 dark: 변형이 켜진다 */
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.625rem;
+
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.129 0.042 264.695);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.129 0.042 264.695);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.129 0.042 264.695);
+  --primary: oklch(0.208 0.042 265.755);
+  --primary-foreground: oklch(0.984 0.003 247.858);
+  --secondary: oklch(0.968 0.007 247.896);
+  --secondary-foreground: oklch(0.208 0.042 265.755);
+  --muted: oklch(0.968 0.007 247.896);
+  --muted-foreground: oklch(0.554 0.046 257.417);
+  --accent: oklch(0.968 0.007 247.896);
+  --accent-foreground: oklch(0.208 0.042 265.755);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.984 0.003 247.858);
+  --border: oklch(0.929 0.013 255.508);
+  --input: oklch(0.929 0.013 255.508);
+  --ring: oklch(0.704 0.04 256.788);
+
+  /*
+   * 파일 종류별 색.
+   *
+   * 순서가 곧 접근성 장치라서 임의로 바꾸면 안 된다. 이 7색은 흰 배경(#ffffff) 기준으로
+   * 명도대·채도·색각이상 분리도·정상시야 분리도 검사를 모두 통과한 조합이다.
+   * 색은 '순위'가 아니라 '카테고리'에 고정으로 붙는다. 정렬이 바뀌어도 색은 그대로다.
+   * '기타'는 시리즈 색이 아니라 꼬리 묶음이라 일부러 무채색을 쓴다.
+   */
+  --chart-document: #2a78d6;
+  --chart-image: #eb6834;
+  --chart-video: #1baf7a;
+  --chart-audio: #eda100;
+  --chart-archive: #e87ba4;
+  --chart-installer: #008300;
+  --chart-code: #4a3aa7;
+  --chart-other: #898781;
+}
+
+.dark {
+  --background: oklch(0.129 0.042 264.695);
+  --foreground: oklch(0.984 0.003 247.858);
+  --card: oklch(0.208 0.042 265.755);
+  --card-foreground: oklch(0.984 0.003 247.858);
+  --popover: oklch(0.208 0.042 265.755);
+  --popover-foreground: oklch(0.984 0.003 247.858);
+  --primary: oklch(0.929 0.013 255.508);
+  --primary-foreground: oklch(0.208 0.042 265.755);
+  --secondary: oklch(0.279 0.041 260.031);
+  --secondary-foreground: oklch(0.984 0.003 247.858);
+  --muted: oklch(0.279 0.041 260.031);
+  --muted-foreground: oklch(0.704 0.04 256.788);
+  --accent: oklch(0.279 0.041 260.031);
+  --accent-foreground: oklch(0.984 0.003 247.858);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.984 0.003 247.858);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.551 0.027 264.364);
+
+  /* 같은 7가지 색상을 어두운 카드 배경(#1e293b)에 맞춰 다시 고른 값. 밝기만 뒤집은 게 아니다. */
+  --chart-document: #3987e5;
+  --chart-image: #d95926;
+  --chart-video: #199e70;
+  --chart-audio: #c98500;
+  --chart-archive: #d55181;
+  --chart-installer: #008300;
+  --chart-code: #9085e9;
+  --chart-other: #898781;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family:
+      'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic',
+      system-ui, sans-serif;
+    /* 데스크톱 앱이므로 텍스트 드래그 선택은 필요한 곳에서만 켠다 */
+    user-select: none;
+    overflow: hidden;
+  }
+
+  /* 경로처럼 사용자가 복사할 만한 값은 선택 가능하게 */
+  .selectable {
+    user-select: text;
+  }
+}

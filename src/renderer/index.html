@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ko" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      renderer는 로컬 자원만 불러온다. 외부 네트워크로 나가는 경로를 원천 차단한다.
+      'unsafe-inline' 과 ws: 는 Vite 개발 서버(HMR)가 요구하는 최소치다.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ws:"
+    />
+    <title>PC 정리 도구</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

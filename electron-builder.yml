@@ -1,0 +1,21 @@
+appId: com.jdh.pc-organizer
+productName: PC 정리 도구
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - out/**
+  - package.json
+
+win:
+  target:
+    - nsis
+  # 조회 전용 도구라 관리자 권한이 필요 없다.
+  # 권한을 올려 받으면 사용자가 경고를 무시하는 데 익숙해질 뿐이다.
+  requestedExecutionLevel: asInvoker
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
