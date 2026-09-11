@@ -1,4 +1,4 @@
-import { useState, type DragEvent, type JSX, type MouseEvent } from 'react'
+import { useRef, useState, type DragEvent, type JSX, type MouseEvent } from 'react'
 import { Folder as FolderIcon, MoreHorizontal, PauseCircle, Pencil } from 'lucide-react'
 import type { PlanItem, ProposedFolder } from '@shared/types'
 import { Menu, MenuItem } from '@/components/ui/menu'
@@ -139,29 +139,42 @@ function FolderHeader({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(folder.name)
   const [error, setError] = useState<string | null>(null)
+  // 입력란을 닫기로 한 뒤 언마운트되며 오는 blur 를 무시하기 위한 표시.
+  // (Escape 로 버린 초안을 blur 가 도로 커밋하면 안 된다)
+  const closed = useRef(true)
 
   const canRename = !folder.existing && !disabled
 
   const startEdit = (): void => {
     if (!canRename) return
+    closed.current = false
     setDraft(folder.name)
     setError(null)
     setEditing(true)
   }
 
-  const commit = (): void => {
-    const message = onRename(folder.name, draft)
-    if (message) {
-      setError(message)
-      return
-    }
+  const close = (message: string | null): void => {
+    closed.current = true
     setEditing(false)
-    setError(null)
+    setError(message)
   }
 
-  const cancel = (): void => {
-    setEditing(false)
-    setError(null)
+  /** Enter. 실패하면 입력란을 열어 둔 채 이유를 보여줘 고칠 수 있게 한다 */
+  const commit = (): void => {
+    const message = onRename(folder.name, draft)
+    if (message) setError(message)
+    else close(null)
+  }
+
+  const cancel = (): void => close(null)
+
+  /**
+   * 밖을 눌러 나가는 길. 통하면 반영하고, 아니면 초안을 버리고 닫되 이유는 남긴다 —
+   * 실패한 채로 열어 두면 blur 가 올 때마다 같은 오류만 되풀이되고 Escape 말고는 빠져나갈 수 없다
+   */
+  const onBlur = (): void => {
+    if (closed.current) return
+    close(onRename(folder.name, draft))
   }
 
   return (
@@ -178,7 +191,7 @@ function FolderHeader({
               if (e.key === 'Enter') commit()
               if (e.key === 'Escape') cancel()
             }}
-            onBlur={commit}
+            onBlur={onBlur}
             aria-label="폴더 이름"
             className="bg-background border-input h-6 min-w-0 flex-1 rounded border px-1.5 text-xs font-semibold outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
           />

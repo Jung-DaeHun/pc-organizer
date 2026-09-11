@@ -53,6 +53,18 @@ export function usePlan(): PlanState {
     }
   }, [])
 
+  /**
+   * 계획의 진실은 이 ref 하나다. 폴더 조작은 실패할 수 있어 결과를 동기적으로 돌려줘야 하는데
+   * setState 의 함수형 갱신 안에서는 값을 밖으로 못 꺼내므로, 모든 쓰기가 commitPlan 을 거쳐
+   * ref 와 state 를 같은 순간에 바꾼다. (effect 로 ref 를 늦게 채우면 한 렌더 동안 둘이 어긋난다)
+   */
+  const planRef = useRef<OrganizePlan | null>(null)
+  const commitPlan = useCallback((next: OrganizePlan | null, isEdit: boolean) => {
+    planRef.current = next
+    setPlan(next)
+    setEdited(isEdit)
+  }, [])
+
   const guard = useCallback(
     async <T>(kind: PlanBusy, work: () => Promise<T>, fallback: string): Promise<T | null> => {
       setBusy(kind)
@@ -73,12 +85,9 @@ export function usePlan(): PlanState {
   const build = useCallback(
     async (root: string, scannedAt: number) => {
       const next = await guard('build', () => window.api.buildPlan(root, scannedAt), '계획을 세우지 못했습니다')
-      if (next && mounted.current) {
-        setPlan(next)
-        setEdited(false)
-      }
+      if (next && mounted.current) commitPlan(next, false)
     },
-    [guard]
+    [guard, commitPlan]
   )
 
   const preview = useCallback(
@@ -88,40 +97,30 @@ export function usePlan(): PlanState {
 
   const advise = useCallback(async () => {
     const next = await guard('advise', () => window.api.advisePlan(), 'AI 추천을 받지 못했습니다')
-    if (next && mounted.current) {
-      setPlan(next)
-      setEdited(false)
-    }
-  }, [guard])
+    if (next && mounted.current) commitPlan(next, false)
+  }, [guard, commitPlan])
 
   // ---------------------------------------------------------------- 판 편집
 
-  const moveItems = useCallback<PlanState['moveItems']>((ids, toFolder) => {
-    setPlan((current) => (current ? moveItemsIn(current, ids, toFolder) : current))
-    setEdited(true)
-  }, [])
+  /** 편집 하나. 실패하면 화면에 보여줄 문장, 아무것도 안 바뀌면 edited 도 건드리지 않는다 */
+  const applyEdit = useCallback(
+    (edit: (current: OrganizePlan) => EditResult): string | null => {
+      const current = planRef.current
+      if (!current) return '계획이 없습니다'
+      const result = edit(current)
+      if (!result.ok) return result.error
+      if (result.plan !== current) commitPlan(result.plan, true)
+      return null
+    },
+    [commitPlan]
+  )
 
-  /**
-   * 폴더 조작은 실패할 수 있어 결과를 동기적으로 돌려줘야 한다.
-   * setState 의 함수형 갱신 안에서는 값을 밖으로 못 꺼내므로 최신 plan 을 ref 로 따로 든다.
-   * (이벤트 핸들러에서만 읽으므로 effect 로 늦게 채워도 항상 최신이다)
-   */
-  const planRef = useRef<OrganizePlan | null>(null)
-  useEffect(() => {
-    planRef.current = plan
-  }, [plan])
-
-  const applyEdit = useCallback((edit: (current: OrganizePlan) => EditResult): string | null => {
-    const current = planRef.current
-    if (!current) return '계획이 없습니다'
-    const result = edit(current)
-    if (!result.ok) return result.error
-    planRef.current = result.plan
-    setPlan(result.plan)
-    setEdited(true)
-    return null
-  }, [])
-
+  const moveItems = useCallback<PlanState['moveItems']>(
+    (ids, toFolder) => {
+      applyEdit((current) => ({ ok: true, plan: moveItemsIn(current, ids, toFolder) }))
+    },
+    [applyEdit]
+  )
   const addFolder = useCallback<PlanState['addFolder']>(
     (name) => applyEdit((current) => addFolderTo(current, name)),
     [applyEdit]
@@ -134,16 +133,17 @@ export function usePlan(): PlanState {
     (name) => applyEdit((current) => removeFolderFrom(current, name)),
     [applyEdit]
   )
-  const keepAll = useCallback<PlanState['keepAll']>((folder) => {
-    setPlan((current) => (current ? keepAllIn(current, folder) : current))
-    setEdited(true)
-  }, [])
+  const keepAll = useCallback<PlanState['keepAll']>(
+    (folder) => {
+      applyEdit((current) => ({ ok: true, plan: keepAllIn(current, folder) }))
+    },
+    [applyEdit]
+  )
 
   const clear = useCallback(() => {
-    setPlan(null)
+    commitPlan(null, false)
     setError(null)
-    setEdited(false)
-  }, [])
+  }, [commitPlan])
 
   return {
     plan,

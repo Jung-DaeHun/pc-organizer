@@ -30,6 +30,15 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
+  // 창은 우리 페이지 말고는 아무 데도 가지 않는다. 탐색기에서 파일을 창에 떨어뜨리면 Chromium 이
+  // 그 파일(file://)로 이동하는데, preload 가 붙은 채 임의 로컬 HTML 이 열리면 window.api 에
+  // 닿는다. renderer 의 dragover/drop 차단이 첫 번째 벽이고 이게 두 번째 벽이다.
+  // (새로고침은 같은 URL 이라 통과한다. loadURL/loadFile 은 이 이벤트를 내지 않는다)
+  win.webContents.on('will-navigate', (event, url) => {
+    const strip = (u: string): string => u.split('#')[0] ?? u
+    if (strip(url) !== strip(win.webContents.getURL())) event.preventDefault()
+  })
+
   const devServerUrl = process.env['ELECTRON_RENDERER_URL']
   if (devServerUrl) {
     void win.loadURL(devServerUrl)

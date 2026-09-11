@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 /** 카드에 이름 말고 무엇을 더 보여줄지. 이름(과 폴더의 파일 수)은 항상 보인다 */
 export interface CardFields {
@@ -38,16 +38,17 @@ function load(): CardFields {
 export function useCardFields(): [CardFields, (key: keyof CardFields, value: boolean) => void] {
   const [fields, setFields] = useState<CardFields>(load)
 
+  // 저장은 갱신자 밖(effect)에서 한다. 갱신자는 StrictMode 에서 두 번 돌 수 있어 순수해야 한다
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(fields))
+    } catch {
+      // 저장이 안 돼도 이번 세션 동안은 유지된다
+    }
+  }, [fields])
+
   const setField = useCallback((key: keyof CardFields, value: boolean) => {
-    setFields((current) => {
-      const next = { ...current, [key]: value }
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
-      } catch {
-        // 저장이 안 돼도 이번 세션 동안은 유지된다
-      }
-      return next
-    })
+    setFields((current) => (current[key] === value ? current : { ...current, [key]: value }))
   }, [])
 
   return [fields, setField]

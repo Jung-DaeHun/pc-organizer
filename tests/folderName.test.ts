@@ -10,12 +10,20 @@ describe('sanitizeFolderName', () => {
 
   it('윈도우에서 쓸 수 없는 이름을 거른다', () => {
     for (const bad of [
-      '', '   ', '.', '..', '../etc', 'a/b', 'a\b', 'a:b', 'a*b', 'a?b', 'a"b', 'a<b', 'a>b', 'a|b',
+      // 'a\\b' 는 백슬래시 하나다. 'a\b' 로 적으면 백스페이스(U+0008)가 되어 다른 검사를 탄다
+      '', '   ', '.', '..', '../etc', 'a/b', 'a\\b', 'a:b', 'a*b', 'a?b', 'a"b', 'a<b', 'a>b', 'a|b',
       'CON', 'con.txt', 'LPT1', 'com9.old', '.hidden', 'trailing.', 'a\u0007b',
       'x'.repeat(61)
     ]) {
       expect(sanitizeFolderName(bad), JSON.stringify(bad)).toBeNull()
     }
+  })
+
+  it('윈도우 경로 구분자(백슬래시)는 제어 문자 검사가 아니라 금지 문자 검사로 걸린다', () => {
+    const withBackslash = 'a\\b'
+    expect(withBackslash).toHaveLength(3)
+    expect(withBackslash.charCodeAt(1)).toBe(0x5c)
+    expect(sanitizeFolderName(withBackslash)).toBeNull()
   })
 })
 

@@ -1,4 +1,10 @@
-import type { OrganizePlan, PlanItem, ProposedFolder } from '@shared/types'
+import type {
+  OrganizeItem,
+  OrganizePlan,
+  PlanItem,
+  ProposedFolder,
+  SkipReason
+} from '@shared/types'
 import { folderKey, sanitizeFolderName } from '@shared/folderName'
 
 /**
@@ -7,6 +13,11 @@ import { folderKey, sanitizeFolderName } from '@shared/folderName'
  * 전부 `OrganizePlan → OrganizePlan` 이고 입력을 바꾸지 않는다. 경로는 어디에도 없다 —
  * 계획은 목적지를 폴더 이름으로만 말하고, 실제 경로는 실행 단계에서 main 이 만든다.
  * 컴포넌트 테스트가 없는 프로젝트라, 판의 규칙은 여기에 모아 Vitest 로 검증한다.
+ *
+ * main 의 규칙(planner · advisor)과 같은 불변 조건을 지킨다 — **목적지로 쓰이는 폴더는 옮기지
+ * 않는다.** 열과 같은 이름의 폴더 카드는 그 열 자체라 자기 자신으로도 다른 열로도 갈 수 없고,
+ * 반대로 이미 다른 열로 보낸 폴더 카드의 이름으로는 열을 만들 수 없다. 둘 중 하나라도 뚫리면
+ * 판이 보여주는 것과 실행 결과가 달라진다.
  */
 
 export interface KanbanColumn {
@@ -40,6 +51,16 @@ function findFolder(plan: OrganizePlan, name: string): ProposedFolder | undefine
   return plan.folders.find((f) => folderKey(f.name) === key)
 }
 
+/**
+ * 이 폴더 카드가 판의 어느 열과 같은 이름인가. 그러면 카드는 그 열 자체다 — 옮기면 열이 사라지거나
+ * 자기 안으로 들어가므로 그대로 두기 말고는 갈 곳이 없다. 카드 UI 도 이걸로 드래그를 막는다.
+ */
+export function isDestinationDir(item: OrganizeItem, folders: readonly ProposedFolder[]): boolean {
+  if (item.kind !== 'dir') return false
+  const key = folderKey(item.name)
+  return folders.some((f) => folderKey(f.name) === key)
+}
+
 /** 열과 카드로 묶는다. 카드는 열 안에서 크기 큰 순 */
 export function groupByFolder(plan: OrganizePlan): KanbanGroups {
   const buckets = new Map<string, PlanItem[]>()
@@ -68,7 +89,7 @@ export function groupByFolder(plan: OrganizePlan): KanbanGroups {
 
 /**
  * 항목들을 폴더로(또는 null = 그대로 두기) 옮긴다. 사용자가 직접 정한 것이므로 origin 은 'user'.
- * 모르는 폴더 이름이면 아무것도 바꾸지 않는다.
+ * 모르는 폴더 이름이거나 실제로 바뀐 항목이 없으면 입력을 그대로 돌려준다.
  */
 export function moveItems(
   plan: OrganizePlan,
@@ -80,54 +101,100 @@ export function moveItems(
 
   const idSet = new Set(ids)
   const nextName = target ? target.name : null
-  return {
-    ...plan,
-    items: plan.items.map((p) => {
-      if (!idSet.has(p.item.id) || p.toFolder === nextName) return p
-      return {
-        ...p,
-        toFolder: nextName,
-        // 폴더 이름은 넣지 않는다 — 나중에 폴더 이름을 바꿔도 이유가 낡지 않게
-        reason: nextName ? '직접 옮김' : '직접 그대로 두기로 정함',
-        origin: 'user'
-      }
-    })
-  }
+  let changed = false
+  const items = plan.items.map((p) => {
+    if (!idSet.has(p.item.id) || p.toFolder === nextName) return p
+    // 열과 같은 이름의 폴더 카드는 그 열 자체다. 자기 자신으로도 다른 열로도 보내지 않는다
+    // (그대로 두기로 되돌리는 것만 된다). main 이 이런 항목을 skipped 로 빼는 것과 같은 규칙
+    if (nextName !== null && isDestinationDir(p.item, plan.folders)) return p
+    changed = true
+    return {
+      ...p,
+      toFolder: nextName,
+      // 폴더 이름은 넣지 않는다 — 나중에 폴더 이름을 바꿔도 이유가 낡지 않게
+      reason: nextName ? '직접 옮김' : '직접 그대로 두기로 정함',
+      origin: 'user' as const
+    }
+  })
+  return changed ? { ...plan, items } : plan
 }
 
-type NameCheck = { ok: true; name: string } | { ok: false; error: string }
+/** skipped 중 폴더인 것. 실제로 있는 폴더라 그 이름의 열은 '기존 폴더'다 */
+const DIR_SKIP_REASONS: ReadonlySet<SkipReason> = new Set<SkipReason>([
+  'destination',
+  'has-cloud-only',
+  'excluded-dir'
+])
 
-/** 이름을 검증하고 이미 있는 폴더와 겹치지 않는지 본다. 실패 이유는 화면에 그대로 보여줄 문장 */
+/** 루트에 실제로 있는 폴더 이름인가 (카드로 있든, 목적지·제외 등으로 skipped 에 갔든) */
+function isExistingDirName(plan: OrganizePlan, key: string): boolean {
+  return (
+    plan.items.some((p) => p.item.kind === 'dir' && folderKey(p.item.name) === key) ||
+    plan.skipped.some((s) => DIR_SKIP_REASONS.has(s.reason) && folderKey(s.name) === key)
+  )
+}
+
+/**
+ * 이 이름으로 열을 만들 수 없는 이유. 없으면 null.
+ * 같은 이름의 파일·링크·바로가기가 루트에 있으면 실행 단계의 mkdir 이 EEXIST 로 터지고,
+ * 이미 다른 열로 보낸 폴더 카드의 이름이면 그 폴더가 열이자 카드가 되어 버린다.
+ */
+function nameClash(plan: OrganizePlan, key: string): string | null {
+  const file = plan.items.find((p) => p.item.kind === 'file' && folderKey(p.item.name) === key)
+  if (file) return `'${file.item.name}' 이라는 파일이 있어 같은 이름의 폴더를 만들 수 없습니다`
+
+  const skipped = plan.skipped.find(
+    (s) => !DIR_SKIP_REASONS.has(s.reason) && folderKey(s.name) === key
+  )
+  if (skipped) return `'${skipped.name}' 이(가) 이미 있어 같은 이름의 폴더를 만들 수 없습니다 (${skipped.why})`
+
+  const moved = plan.items.find(
+    (p) => p.item.kind === 'dir' && p.toFolder !== null && folderKey(p.item.name) === key
+  )
+  if (moved) {
+    return `'${moved.item.name}' 폴더를 옮기기로 해서 그 이름의 폴더는 만들 수 없습니다. 먼저 그대로 두기로 돌려놓으세요`
+  }
+  return null
+}
+
+type NameCheck =
+  | { ok: true; name: string; existing: boolean }
+  | { ok: false; error: string }
+
+/** 이름을 검증하고 이미 있는 폴더·항목과 겹치지 않는지 본다. 실패 이유는 화면에 그대로 보여줄 문장 */
 function checkNewName(plan: OrganizePlan, raw: string, except?: string): NameCheck {
   const name = sanitizeFolderName(raw)
   if (!name) {
     return { ok: false, error: '폴더 이름으로 쓸 수 없습니다 (\\ / : * ? " < > | 와 예약어, 끝의 점 금지)' }
   }
+  const key = folderKey(name)
   const dup = findFolder(plan, name)
   if (dup && (!except || folderKey(dup.name) !== folderKey(except))) {
     return { ok: false, error: `'${dup.name}' 폴더가 이미 있습니다` }
   }
-  // 루트에 같은 이름의 파일이 있으면 그 이름으로 폴더를 만들 수 없다
-  const fileClash = plan.items.some(
-    (p) => p.item.kind === 'file' && folderKey(p.item.name) === folderKey(name)
-  )
-  if (fileClash) return { ok: false, error: `'${name}' 이라는 파일이 있어 같은 이름의 폴더를 만들 수 없습니다` }
-  return { ok: true, name }
+  const clash = nameClash(plan, key)
+  if (clash) return { ok: false, error: clash }
+  // 같은 이름의 폴더가 루트에 있으면 그건 '기존 폴더'다 — 실행해도 새로 만들지 않는다
+  return { ok: true, name, existing: isExistingDirName(plan, key) }
 }
 
 /** 사용자가 직접 폴더 열을 만든다. 맨 뒤에 붙는다 */
 export function addFolder(plan: OrganizePlan, raw: string): EditResult {
   const checked = checkNewName(plan, raw)
   if (!checked.ok) return checked
-  // 같은 이름의 폴더 항목(kind = dir)이 루트에 있으면 그건 '기존 폴더'다
-  const existing = plan.items.some(
-    (p) => p.item.kind === 'dir' && folderKey(p.item.name) === folderKey(checked.name)
-  )
-  const folder: ProposedFolder = { name: checked.name, description: '', existing, origin: 'user' }
+  const folder: ProposedFolder = {
+    name: checked.name,
+    description: '',
+    existing: checked.existing,
+    origin: 'user'
+  }
   return { ok: true, plan: { ...plan, folders: [...plan.folders, folder] } }
 }
 
-/** 새 폴더의 이름을 바꾼다. 기존 폴더(실제로 있는 폴더)는 못 바꾼다 */
+/**
+ * 새 폴더의 이름을 바꾼다. 기존 폴더(실제로 있는 폴더)는 못 바꾼다.
+ * 루트에 있는 폴더의 이름으로 바꾸면 addFolder 와 같은 뜻이 되어 그 열은 '기존 폴더'가 된다.
+ */
 export function renameFolder(plan: OrganizePlan, from: string, raw: string): EditResult {
   const folder = findFolder(plan, from)
   if (!folder) return { ok: false, error: '없는 폴더입니다' }
@@ -143,7 +210,7 @@ export function renameFolder(plan: OrganizePlan, from: string, raw: string): Edi
     plan: {
       ...plan,
       folders: plan.folders.map((f) =>
-        folderKey(f.name) === fromKey ? { ...f, name: checked.name } : f
+        folderKey(f.name) === fromKey ? { ...f, name: checked.name, existing: checked.existing } : f
       ),
       items: plan.items.map((p) =>
         p.toFolder !== null && folderKey(p.toFolder) === fromKey

@@ -78,6 +78,11 @@ npx vitest                               # watch 모드
 부를 수 없다. renderer에서 `node:*`나 `electron`을 import 해야 할 것 같으면, 그 코드는 main으로
 가야 한다는 신호다.
 
+창은 우리 페이지 밖으로 이동하지 않는다. 탐색기에서 파일을 창에 떨어뜨리면 Chromium이 그
+파일(`file://`)로 이동하는데, preload가 붙은 채 임의 로컬 HTML이 열리면 `window.api`에 닿는다.
+`renderer/src/main.tsx`가 `dragover`/`drop`의 기본 동작을 막고(첫 번째 벽), `main/index.ts`의
+`will-navigate`가 현재 URL 밖 이동을 막는다(두 번째 벽).
+
 ### 7. AI에게는 메타데이터만 간다
 
 AI 추천은 이 앱에서 네트워크로 나가는 유일한 경로다. 보내는 것은 항목의
@@ -151,6 +156,10 @@ src/renderer/   React UI. Node 권한 없음. App 이 view 상태로 Dashboard /
 **계획 화면은 칸반 보드다.** 폴더 = 열, 항목 = 카드. 카드가 있는 열이 곧 결정이라 승인 체크박스는
 없다(`그대로 두기` 열 = 옮기지 않음). 판 편집 규칙은 `renderer/src/lib/planEdit.ts`의 순수 함수에
 모여 있고 `tests/planEdit.test.ts`가 검증한다. 드래그는 네이티브 HTML5 DnD(의존성 없음).
+판도 main과 같은 규칙을 지킨다 — **목적지로 쓰이는 폴더는 옮기지 않는다.** 열과 같은 이름의 폴더
+카드는 그 열 자체라 옮길 수 없고(`isDestinationDir`, 카드에 '정리 폴더' 배지), 이미 다른 열로 보낸
+폴더 카드의 이름으로는 열을 만들 수 없다. 열 이름은 `skipped`에 간 이름과도 대조한다(폴더면
+'기존 폴더', 파일·링크·바로가기면 거부 — 실행 단계의 `mkdir`이 `EEXIST`로 터지지 않게).
 
 **서비스는 `electron`을 import 하지 않는다.** 그래야 Vitest에서 그대로 돌고 나중에
 `worker_threads`로 옮길 수 있다. `store.ts`만 예외다(`app.getPath`). 앱 경로 같은 값은 import가
@@ -215,7 +224,7 @@ git에는 걸리지 않는다.
 `src/shared/types.ts`의 `ExecutionResult` / `UndoEntry`는 **승인 → 실행 → 실행취소**를 위해 자리만
 잡아둔 타입이다. 지금 코드는 이 값을 만들지 않는다. 실행기는 `services/executor.ts`에 두고 쓰기
 I/O(`mkdir`/`rename`/`trashItem`)는 `ExecutorIo`로 주입받아 `ipc/handlers.ts`에서만 실체화한다.
-이름을 바꾸지 않고(`join(toDir, item.name)`) 덮어쓰지 않으며(목적지에 같은 이름이 있으면 실패)
+이름을 바꾸지 않고(`join(root, toFolder, item.name)`) 덮어쓰지 않으며(목적지에 같은 이름이 있으면 실패)
 복사하지 않는다(`EXDEV`면 실패). 삭제는 항상 휴지통을 경유하고 규칙(중복 후보)에서만 나오며,
 지우기 전에 전체 해시로 다시 확인한다 — 그때 `hashFull`은 열기 직전에 `lstat`으로 클라우드 전용
 여부를 다시 본다.

@@ -264,7 +264,7 @@ export interface PlanItem {
 export interface OrganizePlan {
   id: string
   createdAt: number
-  /** 감시 폴더. 모든 toDir 은 이 안에 있다 */
+  /** 감시 폴더. 모든 목적지(toFolder)는 이 바로 아래다 */
   root: string
   folders: ProposedFolder[]
   items: PlanItem[]

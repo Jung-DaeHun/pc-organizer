@@ -4,6 +4,7 @@ import { CATEGORY_LABELS, type PlanItem, type PlanOrigin, type ProposedFolder } 
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from '@/components/ui/menu'
 import type { CardFields } from '@/hooks/useCardFields'
 import { formatBytes, formatCount, formatDate } from '@/lib/format'
+import { isDestinationDir } from '@/lib/planEdit'
 import { cn } from '@/lib/utils'
 
 export const ORIGIN_LABELS: Record<PlanOrigin, string> = { rule: '규칙', ai: 'AI', user: '직접' }
@@ -43,6 +44,9 @@ export function PlanCard({
 }: PlanCardProps): JSX.Element {
   const { item, reason, origin } = planItem
   const isDir = item.kind === 'dir'
+  // 열과 같은 이름의 폴더 카드는 그 열 자체다. 옮길 수 없고(planEdit.moveItems 도 거부한다) 그 사실을 적는다
+  const pinned = isDestinationDir(item, folders)
+  const canMove = !disabled && !pinned
 
   const meta: string[] = []
   if (fields.size) meta.push(formatBytes(item.size))
@@ -54,18 +58,18 @@ export function PlanCard({
       role="option"
       aria-selected={selected}
       tabIndex={0}
-      draggable={!disabled}
+      draggable={canMove}
       onClick={(e) => onClick(item.id, e)}
       onDragStart={(e) => onDragStart(item.id, e)}
       onDragEnd={onDragEnd}
       className={cn(
-        'group bg-card relative cursor-grab rounded-md border px-2.5 py-2 text-xs shadow-sm select-none',
+        'group bg-card relative rounded-md border px-2.5 py-2 text-xs shadow-sm select-none',
         'hover:border-primary/40 focus-visible:ring-ring/50 outline-none focus-visible:ring-[3px]',
+        canMove ? 'cursor-grab' : 'cursor-default',
         selected && 'ring-primary ring-2',
-        dragging && 'opacity-40',
-        disabled && 'cursor-default'
+        dragging && 'opacity-40'
       )}
-      title={item.path}
+      title={pinned ? `${item.path}\n같은 이름의 열이 있어 옮기지 않습니다 (정리 폴더)` : item.path}
     >
       <div className="flex items-start gap-1.5">
         {isDir ? (
@@ -74,6 +78,11 @@ export function PlanCard({
           <FileIcon className="text-muted-foreground mt-0.5 size-3.5 shrink-0" />
         )}
         <span className="min-w-0 flex-1 truncate font-medium">{item.name}</span>
+        {pinned && (
+          <span className="bg-secondary text-secondary-foreground shrink-0 rounded px-1 text-[10px] leading-4">
+            정리 폴더
+          </span>
+        )}
         {isDir && (
           <span className="text-muted-foreground shrink-0 text-[11px]">
             {formatCount(item.fileCount ?? 0)}개
@@ -105,21 +114,24 @@ export function PlanCard({
           >
             {(close) => (
               <>
-                <MenuLabel>폴더로 이동</MenuLabel>
-                {folders.map((f) => (
-                  <MenuItem
-                    key={f.name}
-                    disabled={column !== null && f.name === column}
-                    onSelect={() => {
-                      onMove([item.id], f.name)
-                      close()
-                    }}
-                  >
-                    <FolderIcon className="size-3.5" />
-                    <span className="truncate">{f.name}</span>
-                  </MenuItem>
-                ))}
-                {folders.length > 0 && <MenuSeparator />}
+                <MenuLabel>
+                  {pinned ? '같은 이름의 열이 있어 옮길 수 없습니다' : '폴더로 이동'}
+                </MenuLabel>
+                {!pinned &&
+                  folders.map((f) => (
+                    <MenuItem
+                      key={f.name}
+                      disabled={column !== null && f.name === column}
+                      onSelect={() => {
+                        onMove([item.id], f.name)
+                        close()
+                      }}
+                    >
+                      <FolderIcon className="size-3.5" />
+                      <span className="truncate">{f.name}</span>
+                    </MenuItem>
+                  ))}
+                {!pinned && folders.length > 0 && <MenuSeparator />}
                 <MenuItem
                   disabled={column === null}
                   onSelect={() => {

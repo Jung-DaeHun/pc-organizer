@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import type { OrganizeItem, OrganizePlan, PlanItem, ProposedFolder } from '@shared/types'
+import {
+  SKIP_REASON_LABELS,
+  type OrganizeItem,
+  type OrganizePlan,
+  type PlanItem,
+  type ProposedFolder,
+  type SkipReason,
+  type SkippedItem
+} from '@shared/types'
 import {
   addFolder,
   groupByFolder,
+  isDestinationDir,
   keepAll,
   moveItems,
   removeFolder,
@@ -36,19 +45,25 @@ function folder(name: string, partial: Partial<ProposedFolder> = {}): ProposedFo
   return { name, description: '', existing: false, origin: 'rule', ...partial }
 }
 
-function plan(items: PlanItem[], folders: ProposedFolder[], skipped = 0): OrganizePlan {
+function skipped(name: string, reason: SkipReason): SkippedItem {
+  return { path: `C:\\root\\${name}`, name, reason, why: SKIP_REASON_LABELS[reason] }
+}
+
+function plan(
+  items: PlanItem[],
+  folders: ProposedFolder[],
+  skippedItems: number | SkippedItem[] = 0
+): OrganizePlan {
   return {
     id: 'p',
     createdAt: NOW,
     root: 'C:\\root',
     folders,
     items,
-    skipped: Array.from({ length: skipped }, (_, i) => ({
-      path: `C:\\root\\s${i}`,
-      name: `s${i}`,
-      reason: 'shortcut' as const,
-      why: '바로가기'
-    }))
+    skipped:
+      typeof skippedItems === 'number'
+        ? Array.from({ length: skippedItems }, (_, i) => skipped(`s${i}`, 'shortcut'))
+        : skippedItems
   }
 }
 
@@ -111,6 +126,50 @@ describe('moveItems', () => {
     const next = moveItems(p, [b.id], 'photos')
     expect(next.items[0]?.toFolder).toBe('Photos')
   })
+
+  it('실제로 바뀐 항목이 없으면 입력을 그대로 돌려준다', () => {
+    expect(moveItems(base, [a.id], '문서')).toBe(base) // 이미 문서에 있다
+    expect(moveItems(base, ['없는 id'], '이미지')).toBe(base)
+  })
+
+  describe('열과 같은 이름의 폴더 카드는 그 열 자체다 (main 의 destination 규칙)', () => {
+    const proj = item('proj', 0, 'dir')
+    const other = item('other', 0, 'dir')
+    // 열 'proj' 가 있고 루트에도 폴더 proj 가 있다 (사용자가 addFolder 로 만든 상황)
+    const withColumn = plan(
+      [pi(a, null), pi(proj, null), pi(other, null)],
+      [folder('proj', { existing: true }), folder('X')]
+    )
+
+    it('isDestinationDir 는 dir 이면서 열 이름과 같을 때만 참', () => {
+      expect(isDestinationDir(proj, withColumn.folders)).toBe(true)
+      expect(isDestinationDir(other, withColumn.folders)).toBe(false)
+      expect(isDestinationDir(item('proj', 1), withColumn.folders)).toBe(false) // 같은 이름의 파일
+      expect(isDestinationDir(proj, [folder('PROJ')])).toBe(true) // 대소문자 무시
+    })
+
+    it('자기 자신(같은 이름의 열)으로는 옮겨지지 않는다', () => {
+      expect(moveItems(withColumn, [proj.id], 'proj')).toBe(withColumn)
+    })
+
+    it('다른 열로도 옮겨지지 않는다 — 목적지 폴더가 함께 이동하면 판과 실행 결과가 달라진다', () => {
+      const next = moveItems(withColumn, [a.id, proj.id, other.id], 'X')
+      expect(next.items.map((p) => [p.item.name, p.toFolder])).toEqual([
+        ['a.txt', 'X'],
+        ['proj', null],
+        ['other', 'X']
+      ])
+      // 순서를 바꿔 a 를 proj 로 먼저 보낸 뒤에도 proj 카드는 못 움직인다
+      const filled = moveItems(withColumn, [a.id], 'proj')
+      expect(moveItems(filled, [proj.id], 'X')).toBe(filled)
+    })
+
+    it('그대로 두기로 되돌리는 것은 된다', () => {
+      // 열 이름과 같은 dir 카드가 다른 열에 가 있는 상태는 만들 수 없어야 하지만, 혹시 있어도 빠져나올 수 있다
+      const stuck = plan([pi(proj, 'X')], [folder('proj'), folder('X')])
+      expect(moveItems(stuck, [proj.id], null).items[0]?.toFolder).toBeNull()
+    })
+  })
 })
 
 describe('addFolder', () => {
@@ -136,6 +195,39 @@ describe('addFolder', () => {
   it('루트에 같은 이름의 폴더가 있으면 기존 폴더로 표시한다', () => {
     const r = addFolder(base, 'proj')
     expect(r.ok && r.plan.folders[1]?.existing).toBe(true)
+  })
+
+  it('이미 다른 열로 보낸 폴더 카드의 이름으로는 열을 만들 수 없다', () => {
+    const proj = item('proj', 0, 'dir')
+    const p = plan([pi(proj, '문서')], [folder('문서')])
+    const r = addFolder(p, 'proj')
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('먼저 그대로 두기로')
+    // 그대로 두기로 돌려놓으면 만들 수 있고, 그 열은 기존 폴더다
+    const back = moveItems(p, [proj.id], null)
+    const r2 = addFolder(back, 'proj')
+    expect(r2.ok && r2.plan.folders[1]?.existing).toBe(true)
+  })
+
+  it('skipped 에 간 이름도 본다 — 폴더면 기존 폴더, 파일·링크·바로가기면 거부', () => {
+    const p = plan([], [], [
+      skipped('사진', 'has-cloud-only'),
+      skipped('node_modules', 'excluded-dir'),
+      skipped('문서', 'destination'),
+      skipped('메모.lnk', 'shortcut'),
+      skipped('desktop.ini', 'system'),
+      skipped('연결', 'link'),
+      skipped('받는중.pdf', 'cloud-only')
+    ])
+    for (const dir of ['사진', 'node_modules', '문서']) {
+      const r = addFolder(p, dir)
+      expect(r.ok && r.plan.folders[0]?.existing, dir).toBe(true)
+    }
+    for (const bad of ['메모.lnk', 'desktop.ini', '연결', '받는중.pdf']) {
+      const r = addFolder(p, bad)
+      expect(r.ok, bad).toBe(false)
+      if (!r.ok) expect(r.error, bad).toContain(bad)
+    }
   })
 })
 
@@ -166,6 +258,29 @@ describe('renameFolder', () => {
     const p = plan([], [folder('photos')])
     const r = renameFolder(p, 'photos', 'Photos')
     expect(r.ok && r.plan.folders[0]?.name).toBe('Photos')
+  })
+
+  it('루트에 있는 폴더의 이름으로 바꾸면 기존 폴더가 되고 새 폴더 수에서 빠진다', () => {
+    const proj = item('proj', 0, 'dir')
+    const p = plan([pi(a, '임시'), pi(proj, null)], [folder('임시')])
+    expect(summarize(p).newFolders).toBe(1)
+
+    const r = renameFolder(p, '임시', 'proj')
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.plan.folders[0]).toMatchObject({ name: 'proj', existing: true })
+      expect(r.plan.items[0]?.toFolder).toBe('proj')
+      expect(summarize(r.plan).newFolders).toBe(0)
+      // addFolder 와 같은 답이어야 한다
+      const added = addFolder(plan([pi(proj, null)], []), 'proj')
+      expect(added.ok && added.plan.folders[0]?.existing).toBe(true)
+    }
+  })
+
+  it('이미 다른 열로 보낸 폴더 카드의 이름으로는 바꿀 수 없다', () => {
+    const proj = item('proj', 0, 'dir')
+    const p = plan([pi(proj, '문서')], [folder('문서'), folder('임시')])
+    expect(renameFolder(p, '임시', 'proj').ok).toBe(false)
   })
 })
 

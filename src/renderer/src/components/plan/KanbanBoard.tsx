@@ -67,9 +67,12 @@ export function KanbanBoard({
 
   // ---------------------------------------------------------------- 선택
 
+  // 이벤트에서 읽을 값은 갱신자 밖에서 미리 읽는다. 갱신자는 나중에(렌더 중에) 돌고, 그때는
+  // React 가 합성 이벤트의 currentTarget 을 이미 null 로 비운 뒤라 거기서 읽으면 예외가 난다
   const onCardClick = useCallback((id: string, e: MouseEvent) => {
+    const toggle = e.ctrlKey || e.metaKey
     setSelected((current) => {
-      if (e.ctrlKey || e.metaKey) {
+      if (toggle) {
         const next = new Set(current)
         if (next.has(id)) next.delete(id)
         else next.add(id)
@@ -143,7 +146,9 @@ export function KanbanBoard({
     // 자식 요소 사이를 오갈 때도 dragleave 가 오므로, 진짜로 열을 벗어났을 때만 지운다
     const next = e.relatedTarget as Node | null
     if (next && (e.currentTarget as HTMLElement).contains(next)) return
-    setDropTarget((current) => (current === columnOf(e) ? null : current))
+    // 갱신자 안에서 columnOf(e) 를 읽으면 currentTarget 이 null 이라 화면 전체가 내려간다
+    const column = columnOf(e)
+    setDropTarget((current) => (current === column ? null : current))
   }, [])
 
   const onColumnDrop = useCallback(
