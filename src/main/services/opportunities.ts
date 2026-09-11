@@ -140,8 +140,9 @@ export async function findDuplicates(
     count += extras
     bytes += group[0].size * extras
 
-    // 미리보기에는 남길 하나를 뺀 나머지를 보여준다
-    redundant.push(...group.slice(1))
+    // 미리보기에는 남길 하나를 뺀 나머지를 보여준다.
+    // `push(...arr)` 는 그룹이 아주 크면 콜 스택을 넘기므로 하나씩 넣는다.
+    for (let i = 1; i < group.length; i += 1) redundant.push(group[i] as FileEntry)
   }
 
   return {

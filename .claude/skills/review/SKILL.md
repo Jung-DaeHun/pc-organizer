@@ -45,16 +45,17 @@ grep -n "contextIsolation\|nodeIntegration\|sandbox\|webSecurity" src/main/index
 grep -rn "from 'node:\|require(\|from 'electron'" src/renderer/
 ```
 
-### 2-2. 1단계는 조회 전용 — 쓰기 금지
+### 2-2. 계획 세우기까지는 조회 전용 — 쓰기 금지
 
-지금 단계에서 파일을 바꾸는 코드는 **한 줄도 없어야 한다**. 스캔 결과가 정확하다는 확신이 서기 전에
-되돌릴 수 없는 동작을 붙이면, 버그 하나가 곧바로 사용자 파일 손실이 된다.
+스캔·계획·AI 추천은 사용자 파일을 바꾸는 코드가 **한 줄도 없어야 한다**. 스캔 결과가 정확하다는
+확신이 서기 전에 되돌릴 수 없는 동작을 붙이면, 버그 하나가 곧바로 사용자 파일 손실이 된다.
 
 ```bash
-grep -rn "writeFile\|unlink\|rmdir\|rm(\|rename\|copyFile\|mkdir\|trashItem\|shell.moveItemToTrash" src/main/services/ src/main/ipc/
+grep -rn "writeFile\|unlink\|rmdir\|rm(\|rename\|copyFile\|mkdir\|trashItem\|shell.moveItemToTrash" src/main/services/ src/main/ipc/ src/main/lib/
 ```
 
-허용되는 예외는 `store.ts`의 설정 파일 저장뿐이다. 그 밖에 사용자 파일을 건드리는 호출이 있으면 보고한다.
+허용되는 예외는 `store.ts`의 `userData` 아래 두 파일(`settings.json`, `secrets.json`) 저장뿐이다.
+`topLevel.ts`의 `readdir`/`lstat`은 조회다. 그 밖에 사용자 파일을 건드리는 호출이 있으면 보고한다.
 레지스트리도 마찬가지로 조회만 해야 한다 — `Set-ItemProperty`, `Remove-Item`, `New-Item`이 있으면 보고.
 
 ```bash
@@ -69,6 +70,8 @@ grep -n "Set-ItemProperty\|Remove-Item\|New-Item\|Stop-Process" src/main/service
 - 파일 내용을 읽는 코드(`hashHead`, `open`, `readFile`, `createReadStream`)를 부르기 전에
   `isCloudOnly` / `entry.isCloudOnly`로 걸러내는가
 - `findDuplicates`의 후보 필터에서 `!e.isCloudOnly` 가 빠지지 않았는가
+- `listTopLevel`(정리 계획)이 클라우드 전용 파일을 `skipped`로 빼는가. 같은 OneDrive 루트 안의
+  이동은 내려받기를 유발하지 않을 것으로 보지만, 확신이 설 때까지 계획에 넣지 않는다
 
 ```bash
 grep -rn "isCloudOnly" src/main/
@@ -106,19 +109,23 @@ main과 renderer가 주고받는 값은 `src/shared/`를 거쳐야 한다.
 - 새 IPC 채널이 `shared/channels.ts`, `shared/api.ts`, `main/ipc/handlers.ts`, `preload/index.ts`
   **네 군데 모두**에 반영됐는가. 하나라도 빠지면 런타임에야 드러난다
 - IPC로 넘기는 값이 structured clone 가능한 순수 데이터인가 (클래스 인스턴스, 함수, `Map`/`Set` 금지)
-- renderer로 파일 목록 전체를 넘기지 않는가. 집계 수치만 넘어가야 한다
+- renderer로 파일 목록 전체를 넘기지 않는가. 집계 수치만 넘어가야 한다.
+  정리 계획(`OrganizePlan`)은 감시 폴더 **바로 아래** 항목만 담는 유한한 목록이라 예외다 —
+  `lastEntries` 자체를 넘기는 코드가 생기면 보고
+- 계획 채널이 `scannedAt`을 받아 main의 목록과 같은 스캔인지 확인하는가 (`plan.ts`의 `buildPlan`)
 
 ### 2-7. 테스트 가능성
 
-`scanner` / `categorize` / `opportunities` / `summarize`는 `electron`을 import 하지 않아야 한다.
+`src/main/services/` 아래는 `electron`을 import 하지 않아야 한다.
 그래야 Vitest에서 그대로 돌고, 나중에 worker_threads로 옮길 수 있다.
 
 ```bash
 grep -rn "from 'electron'" src/main/services/
 ```
 
-`store.ts`(userData 경로), `temp.ts`(간접 의존)만 예외다.
-I/O가 필요한 로직은 `findDuplicates(entries, hashHead)`처럼 함수를 주입받는 형태인가.
+`store.ts`(userData 경로, safeStorage)만 예외다.
+I/O가 필요한 로직은 `findDuplicates(entries, hashHead)`, `listTopLevel(root, entries, readTopLevel)`,
+`advisePlan(plan, call)`처럼 함수를 주입받는 형태인가.
 
 ### 2-8. 윈도우 경로
 
@@ -132,6 +139,26 @@ I/O가 필요한 로직은 `findDuplicates(entries, hashHead)`처럼 함수를 �
 - 색 값을 새로 넣거나 바꿨다면 검증기를 돌렸는가 (눈대중 금지)
 - 색만으로 정보를 전달하는 구간이 없는가 (범례 겸 표가 값을 항상 같이 보여줘야 한다)
 - 누적 띠의 순서가 데이터가 아니라 고정 카테고리 순서인가
+
+### 2-10. 네트워크 경계 — AI에게는 메타데이터만 간다
+
+이 앱에서 네트워크로 나가는 경로는 AI 추천 하나뿐이다. 무엇이 나가는지 한 파일만 보면 알 수 있어야 한다.
+
+```bash
+grep -rn "@anthropic-ai/sdk\|fetch(\|node:https\|node:http'" src/
+grep -rn "getApiKey" src/
+```
+
+- SDK import가 `src/main/lib/anthropic.ts`에만 있는가 (ESLint `SDK_IMPORT_PATTERN`도 같은 걸 막는다).
+  `fetch`·`node:http(s)` 호출이 어디에도 없는가
+- `getApiKey`가 `store.ts`(정의)와 `ipc/handlers.ts`(클라이언트 생성)에만 있는가.
+  복호화된 키가 서비스로 들어가거나 IPC 응답에 실리는 경로가 없는가
+- 전송 페이로드는 `advisor.ts`의 `buildAdvisorRequest` / `toAdvisorItem` 한 곳에서만 만드는가.
+  `...item` 같은 펼치기로 필드가 조용히 따라 나가지 않는가.
+  `tests/advisor.test.ts`의 "허용된 필드만 보낸다"·"절대 경로와 사용자 이름은 어디에도 없다"가 살아 있는가
+- 응답 스키마(`ADVICE_SCHEMA`)에 `trash` 같은 삭제 동작이 없는가. AI는 이동·분류만 제안한다
+- AI 호출이 사용자가 누른 뒤에만 일어나는가. 스캔이나 계획 세우기가 자동으로 부르는 경로가 없는가
+- 키·페이로드·응답을 `console.log`로 남기지 않는가
 
 ## 3. 일반 결함
 
@@ -151,6 +178,7 @@ I/O가 필요한 로직은 `findDuplicates(entries, hashHead)`처럼 함수를 �
 지적한 것이 실제로 깨지는지 확인한다. 통과하지 못한 채로 리뷰를 끝내지 않는다.
 
 ```bash
+npm run lint
 npm run typecheck
 npm test
 npm run build

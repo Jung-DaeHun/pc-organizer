@@ -1,11 +1,26 @@
 import { describe, expect, it } from 'vitest'
 import {
+  errorMessage,
   formatAge,
   formatBytes,
   formatCount,
   formatPercent,
   truncatePath
 } from '@/lib/format'
+
+describe('errorMessage', () => {
+  it('Electron 이 붙이는 IPC 접두를 떼어낸다', () => {
+    const wrapped = new Error("Error invoking remote method 'plan:build': Error: 먼저 스캔을 실행하세요")
+    expect(errorMessage(wrapped)).toBe('먼저 스캔을 실행하세요')
+  })
+
+  it('접두가 없으면 그대로, 빈 값이면 대체 문구', () => {
+    expect(errorMessage(new Error('그냥 오류'))).toBe('그냥 오류')
+    expect(errorMessage('문자열')).toBe('문자열')
+    expect(errorMessage(null)).toBe('알 수 없는 오류')
+    expect(errorMessage(new Error(''), '실패')).toBe('실패')
+  })
+})
 
 describe('formatBytes', () => {
   it('바이트 단위에서는 소수점을 붙이지 않는다', () => {

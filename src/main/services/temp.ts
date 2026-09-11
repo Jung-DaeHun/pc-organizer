@@ -21,7 +21,7 @@ export async function measureTempAndTrash(): Promise<OpportunityGroup> {
 
   let count = 0
   let bytes = 0
-  const samples: OpportunitySample[] = []
+  let samples: OpportunitySample[] = []
 
   for (const target of targets) {
     // 임시 폴더 안의 node_modules 같은 건 제외하지 않는다. 전부 지워도 되는 곳이다.
@@ -30,19 +30,25 @@ export async function measureTempAndTrash(): Promise<OpportunityGroup> {
     count += scan.entries.length
     bytes += scan.entries.reduce((sum, e) => sum + e.size, 0)
 
-    samples.push(
-      ...scan.entries.map((e) => ({
-        path: e.path,
-        name: e.name,
-        size: e.size,
-        mtimeMs: e.mtimeMs
-      }))
-    )
+    // `push(...entries)` 는 항목 수만큼을 호출 인자로 펼쳐 15만 개쯤부터 콜 스택이 넘친다.
+    // 휴지통에 node_modules 하나만 들어 있어도 그 규모다. 폴더마다 상위 몇 개만 남겨 합친다.
+    samples = topBySize([...samples, ...topBySize(scan.entries, SAMPLE_LIMIT)], SAMPLE_LIMIT)
   }
 
-  return {
-    count,
-    bytes,
-    samples: samples.sort((a, b) => b.size - a.size).slice(0, SAMPLE_LIMIT)
+  return { count, bytes, samples }
+}
+
+/** 크기 상위 n 개, 큰 순서. 전체를 정렬하지 않고 한 번 훑는다 */
+export function topBySize(
+  entries: readonly Pick<OpportunitySample, 'path' | 'name' | 'size' | 'mtimeMs'>[],
+  n: number
+): OpportunitySample[] {
+  const top: OpportunitySample[] = []
+  for (const e of entries) {
+    if (top.length === n && e.size <= (top[n - 1] as OpportunitySample).size) continue
+    top.push({ path: e.path, name: e.name, size: e.size, mtimeMs: e.mtimeMs })
+    top.sort((a, b) => b.size - a.size)
+    if (top.length > n) top.pop()
   }
+  return top
 }

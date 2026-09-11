@@ -1,29 +1,44 @@
 import { useCallback, useEffect, useState, type JSX } from 'react'
-import { Loader2, ScanLine } from 'lucide-react'
+import { ListChecks, Loader2, ScanLine } from 'lucide-react'
 import type { DriveInfo, Settings } from '@shared/types'
 import { Button } from '@/components/ui/button'
+import { ApiKeyCard } from '@/components/ApiKeyCard'
 import { AppsCard } from '@/components/AppsCard'
 import { DriveCard } from '@/components/DriveCard'
 import { FolderSummaryCard } from '@/components/FolderSummaryCard'
 import { OpportunityCard } from '@/components/OpportunityCard'
-import { useScan } from '@/hooks/useScan'
+import type { ScanState } from '@/hooks/useScan'
 import { formatCount, truncatePath } from '@/lib/format'
 
-export default function Dashboard(): JSX.Element {
-  const [drives, setDrives] = useState<DriveInfo[] | null>(null)
-  const [settings, setSettings] = useState<Settings | null>(null)
+interface DashboardProps {
+  scan: ScanState
+  settings: Settings | null
+  onSettingsChange: (settings: Settings) => void
+  hasApiKey: boolean | null
+  onApiKeyChange: (hasKey: boolean) => void
+  onOpenPlan: () => void
+}
 
-  const { result, progress, isScanning, error, run } = useScan()
+export default function Dashboard({
+  scan,
+  settings,
+  onSettingsChange,
+  hasApiKey,
+  onApiKeyChange,
+  onOpenPlan
+}: DashboardProps): JSX.Element {
+  const [drives, setDrives] = useState<DriveInfo[] | null>(null)
+  const { result, progress, isScanning, error, run } = scan
 
   useEffect(() => {
     let alive = true
 
-    void window.api.listDrives().then((next) => {
-      if (alive) setDrives(next)
-    })
-    void window.api.getSettings().then((next) => {
-      if (alive) setSettings(next)
-    })
+    window.api
+      .listDrives()
+      .then((next) => {
+        if (alive) setDrives(next)
+      })
+      .catch((err: unknown) => console.error('드라이브 조회 실패', err))
 
     return () => {
       alive = false
@@ -35,24 +50,25 @@ export default function Dashboard(): JSX.Element {
     if (!picked || !settings) return
     if (settings.watchedFolders.includes(picked)) return
 
-    setSettings(
+    onSettingsChange(
       await window.api.updateSettings({ watchedFolders: [...settings.watchedFolders, picked] })
     )
-  }, [settings])
+  }, [settings, onSettingsChange])
 
   const removeFolder = useCallback(
     async (path: string) => {
       if (!settings) return
-      setSettings(
+      onSettingsChange(
         await window.api.updateSettings({
           watchedFolders: settings.watchedFolders.filter((f) => f !== path)
         })
       )
     },
-    [settings]
+    [settings, onSettingsChange]
   )
 
   const canScan = !isScanning && (settings?.watchedFolders.length ?? 0) > 0
+  const canPlan = !isScanning && result !== null
 
   return (
     <div className="flex h-full flex-col">
@@ -70,10 +86,21 @@ export default function Dashboard(): JSX.Element {
           </p>
         </div>
 
-        <Button onClick={() => void run()} disabled={!canScan}>
-          {isScanning ? <Loader2 className="animate-spin" /> : <ScanLine />}
-          {isScanning ? '스캔 중' : '스캔'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={onOpenPlan}
+            disabled={!canPlan}
+            title={canPlan ? undefined : '스캔한 뒤에 계획을 세울 수 있습니다'}
+          >
+            <ListChecks />
+            정리 계획
+          </Button>
+          <Button onClick={() => void run()} disabled={!canScan}>
+            {isScanning ? <Loader2 className="animate-spin" /> : <ScanLine />}
+            {isScanning ? '스캔 중' : '스캔'}
+          </Button>
+        </div>
       </header>
 
       {error && (
@@ -84,6 +111,7 @@ export default function Dashboard(): JSX.Element {
         <div className="flex flex-col gap-4">
           <DriveCard drives={drives} />
           <AppsCard />
+          <ApiKeyCard hasKey={hasApiKey} onChange={onApiKeyChange} />
         </div>
 
         <div className="flex flex-col gap-4">
@@ -94,7 +122,7 @@ export default function Dashboard(): JSX.Element {
             onAddFolder={() => void addFolder()}
             onRemoveFolder={(path) => void removeFolder(path)}
           />
-          <OpportunityCard opportunities={result?.opportunities ?? null} />
+          <OpportunityCard opportunities={result?.opportunities ?? null} settings={settings} />
         </div>
       </main>
     </div>

@@ -173,23 +173,139 @@ export interface Settings {
   oldFileDays: number
 }
 
-// ---------------------------------------------------------------- 2단계 예약
+// ---------------------------------------------------------------- 정리 계획 (2단계)
+
+export type ItemKind = 'file' | 'dir'
 
 /**
- * 아래 세 타입은 아직 쓰이지 않는다.
- * 2단계(실제 파일 이동)의 '계획 -> 승인 -> 실행 -> 되돌리기' 흐름을 위해
- * 자리만 잡아둔 것으로, 1단계에서는 어떤 코드도 이 값을 만들지 않는다.
+ * 감시 폴더 바로 아래에 있는 항목 하나.
+ *
+ * 정리는 이 단위로만 한다. 폴더는 안을 들여다보지 않고 통째로 하나의 항목이며,
+ * 이미 하위 폴더 안에 있는 파일은 정리된 것으로 보고 건드리지 않는다.
  */
-export interface PlannedAction {
-  kind: 'move' | 'trash'
-  from: string
-  /** kind === 'move' 일 때만 */
-  to?: string
-  reason: string
+export interface OrganizeItem {
+  /** 계획 안에서 항목을 가리키는 짧은 식별자. renderer와 AI 응답이 이 값으로 항목을 지칭한다 */
+  id: string
+  path: string
+  name: string
+  kind: ItemKind
+  /** 소문자, 점 포함. 폴더면 빈 문자열 */
+  ext: string
+  /** 폴더면 아래 파일들의 합 */
+  size: number
+  mtimeMs: number
+  /** 폴더는 항상 'other' */
+  category: FileCategory
+  /** 폴더일 때 아래 파일 수 */
+  fileCount?: number
 }
 
+/** 정리 대상에서 뺀 이유. 화면 문구는 SKIP_REASON_LABELS 에서 고른다 */
+export type SkipReason =
+  | 'link'
+  | 'not-file-or-dir'
+  | 'system'
+  | 'shortcut'
+  | 'not-in-scan'
+  | 'cloud-only'
+  | 'has-cloud-only'
+  | 'excluded-dir'
+  | 'destination'
+
+export const SKIP_REASON_LABELS: Record<SkipReason, string> = {
+  link: '링크·정션은 따라가지 않는다',
+  'not-file-or-dir': '파일도 폴더도 아님',
+  system: '시스템 파일',
+  shortcut: '바로가기',
+  'not-in-scan': '스캔 결과에 없음 (다시 스캔 필요)',
+  'cloud-only': '클라우드 전용 파일 (내려받기 전에는 옮기지 않는다)',
+  'has-cloud-only': '클라우드 전용 파일이 들어 있는 폴더',
+  'excluded-dir': '스캔에서 제외한 폴더 (용량을 알 수 없다)',
+  destination: '정리 폴더(목적지)라 옮기지 않는다'
+}
+
+/** 정리 대상에서 뺀 항목과 그 이유. 화면에 그대로 보여준다 */
+export interface SkippedItem {
+  path: string
+  name: string
+  reason: SkipReason
+  /** SKIP_REASON_LABELS[reason]. renderer 가 표를 찾지 않아도 되게 같이 보낸다 */
+  why: string
+}
+
+/** 계획이 제안하는 목적지 폴더. 감시 폴더 바로 아래에 만들어진다 */
+export interface ProposedFolder {
+  name: string
+  /** 절대 경로 (= join(root, name)). renderer 가 경로를 조립하지 않도록 main 이 만들어 보낸다 */
+  dir: string
+  description: string
+  /** 이미 감시 폴더 안에 있는 폴더인지 */
+  existing: boolean
+}
+
+export interface PlanItem {
+  item: OrganizeItem
+  /**
+   * 옮겨 넣을 폴더의 절대 경로. 항상 계획의 root 바로 아래다. null 이면 그대로 둔다.
+   * 파일 이름은 바뀌지 않는다 — 실제 목적지는 join(toDir, item.name).
+   */
+  toDir: string | null
+  reason: string
+  origin: 'rule' | 'ai'
+  /** 사용자가 실행 대상으로 체크했는지 */
+  approved: boolean
+}
+
+export interface OrganizePlan {
+  id: string
+  createdAt: number
+  /** 감시 폴더. 모든 toDir 은 이 안에 있다 */
+  root: string
+  folders: ProposedFolder[]
+  items: PlanItem[]
+  skipped: SkippedItem[]
+}
+
+// ---------------------------------------------------------------- AI 추천
+
+/**
+ * AI에게 보내는 항목 하나. **여기 적힌 필드 외에는 아무것도 네트워크로 나가지 않는다.**
+ * 절대 경로·사용자 이름·파일 내용은 없다. tests/advisor.test.ts 가 이를 못 박는다.
+ */
+export interface AdvisorItem {
+  id: string
+  name: string
+  kind: ItemKind
+  ext: string
+  size: number
+  /** YYYY-MM-DD. 시각까지는 보내지 않는다 */
+  mtime: string
+  category: FileCategory
+  fileCount?: number
+}
+
+export interface AdvisorRequest {
+  /** 감시 폴더의 마지막 이름만 ('Downloads'). 전체 경로는 보내지 않는다 */
+  rootName: string
+  /** 이미 있는 하위 폴더 이름. AI가 새 폴더 대신 골라 쓸 수 있다 */
+  existingFolders: string[]
+  items: AdvisorItem[]
+}
+
+/** 보내기 전에 사용자에게 보여주는 요약 */
+export interface AdvisorPreview {
+  itemCount: number
+  chunkCount: number
+  sampleNames: string[]
+  approxInputTokens: number
+}
+
+// ---------------------------------------------------------------- 실행 · 실행취소 (B 단계)
+
 export interface ExecutionResult {
-  action: PlannedAction
+  id: string
+  from: string
+  to: string
   ok: boolean
   error?: string
 }
@@ -197,5 +313,6 @@ export interface ExecutionResult {
 export interface UndoEntry {
   id: string
   executedAt: number
+  root: string
   results: ExecutionResult[]
 }

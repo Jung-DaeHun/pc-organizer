@@ -30,7 +30,16 @@ const api: RendererApi = {
     }
   },
 
-  listApps: () => ipcRenderer.invoke(CH.appsList)
+  listApps: () => ipcRenderer.invoke(CH.appsList),
+
+  buildPlan: (root: string, scannedAt: number) =>
+    ipcRenderer.invoke(CH.planBuild, root, scannedAt),
+  previewAdvice: () => ipcRenderer.invoke(CH.planAdvisePreview),
+  advisePlan: () => ipcRenderer.invoke(CH.planAdvise),
+
+  setApiKey: (key: string) => ipcRenderer.invoke(CH.secretsSetApiKey, key),
+  hasApiKey: () => ipcRenderer.invoke(CH.secretsHasApiKey),
+  clearApiKey: () => ipcRenderer.invoke(CH.secretsClearApiKey)
 }
 
 contextBridge.exposeInMainWorld('api', api)

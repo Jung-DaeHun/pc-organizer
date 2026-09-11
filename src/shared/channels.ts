@@ -21,7 +21,18 @@ export const CH = {
   scanProgress: 'scan:progress',
 
   /** 설치된 앱 + 시작 프로그램 */
-  appsList: 'apps:list'
+  appsList: 'apps:list',
+
+  /** 정리 계획 (조회 전용 — 파일은 건드리지 않는다) */
+  planBuild: 'plan:build',
+  /** AI 추천: preview 는 보낼 내용 요약(네트워크 없음), advise 가 실제 호출 */
+  planAdvisePreview: 'plan:advise-preview',
+  planAdvise: 'plan:advise',
+
+  /** API 키. 키 값이 renderer 로 돌아오는 채널은 없다 */
+  secretsSetApiKey: 'secrets:set-api-key',
+  secretsHasApiKey: 'secrets:has-api-key',
+  secretsClearApiKey: 'secrets:clear-api-key'
 } as const
 
 export type Channel = (typeof CH)[keyof typeof CH]

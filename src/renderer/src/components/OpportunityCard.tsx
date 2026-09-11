@@ -1,6 +1,6 @@
 import type { JSX } from 'react'
 import { Copy, Clock, Sparkles, Trash2, Weight } from 'lucide-react'
-import type { Opportunities, OpportunityGroup } from '@shared/types'
+import type { Opportunities, OpportunityGroup, Settings } from '@shared/types'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -8,6 +8,8 @@ import { formatBytes, formatCount, truncatePath } from '@/lib/format'
 
 interface OpportunityCardProps {
   opportunities: Opportunities | null
+  /** 대용량·오래된 파일의 기준값. 힌트 문구가 실제 판정 기준과 어긋나지 않게 */
+  settings: Settings | null
 }
 
 interface Row {
@@ -20,7 +22,10 @@ interface Row {
   needsReview: boolean
 }
 
-export function OpportunityCard({ opportunities }: OpportunityCardProps): JSX.Element {
+export function OpportunityCard({ opportunities, settings }: OpportunityCardProps): JSX.Element {
+  const largeHint = settings ? `${formatBytes(settings.largeFileBytes, 0)} 이상` : '기준 크기 이상'
+  const oldHint = settings ? `${settings.oldFileDays}일 넘게 손대지 않음` : '오래 손대지 않음'
+
   const rows: Row[] = opportunities
     ? [
         {
@@ -44,7 +49,7 @@ export function OpportunityCard({ opportunities }: OpportunityCardProps): JSX.El
           key: 'large',
           icon: <Weight className="size-3.5" />,
           label: '대용량',
-          hint: '100MB 이상',
+          hint: largeHint,
           group: opportunities.large,
           needsReview: true
         },
@@ -52,7 +57,7 @@ export function OpportunityCard({ opportunities }: OpportunityCardProps): JSX.El
           key: 'old',
           icon: <Clock className="size-3.5" />,
           label: '오래된 파일',
-          hint: '180일 넘게 손대지 않음',
+          hint: oldHint,
           group: opportunities.old,
           needsReview: true
         }
@@ -122,10 +127,10 @@ export function OpportunityCard({ opportunities }: OpportunityCardProps): JSX.El
               </div>
 
               {/*
-                2단계에서 실제 정리 화면으로 이어질 자리.
-                지금은 파일을 건드리는 기능이 하나도 없어 눌리지 않게 둔다.
+                실행 단계에서 정리 화면으로 이어질 자리.
+                지금은 파일을 건드리는 채널이 하나도 없어 눌리지 않게 둔다.
               */}
-              <Button variant="outline" size="sm" disabled title="2단계에서 열립니다">
+              <Button variant="outline" size="sm" disabled title="다음 단계에서 열립니다">
                 {row.needsReview ? '검토' : '정리'}
               </Button>
             </div>

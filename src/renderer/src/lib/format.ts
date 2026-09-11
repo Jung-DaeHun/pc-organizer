@@ -46,6 +46,18 @@ export function formatAge(ms: number, now = Date.now()): string {
   return `${Math.floor(days / 365)}년 전`
 }
 
+/**
+ * IPC 핸들러가 던진 예외를 사람이 읽을 메시지로.
+ *
+ * Electron 은 main 의 Error 를 "Error invoking remote method 'x': Error: 메시지" 로 감싸서 넘긴다.
+ * 그 접두는 사용자에게 아무 정보도 아니라 떼어낸다.
+ */
+export function errorMessage(err: unknown, fallback = '알 수 없는 오류'): string {
+  const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : ''
+  const cleaned = raw.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, '').trim()
+  return cleaned || fallback
+}
+
 /** 긴 경로를 가운데를 접어서 줄인다. 'C:\Users\...\report.pdf' */
 export function truncatePath(path: string, maxLength = 48): string {
   if (path.length <= maxLength) return path

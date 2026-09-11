@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ScanProgress, ScanResult } from '@shared/types'
+import { errorMessage } from '@/lib/format'
 
 export interface ScanState {
   result: ScanResult | null
@@ -46,7 +47,7 @@ export function useScan(): ScanState {
       if (mounted.current) setResult(next)
     } catch (err) {
       console.error('스캔 실패', err)
-      if (mounted.current) setError(err instanceof Error ? err.message : '스캔에 실패했습니다')
+      if (mounted.current) setError(errorMessage(err, '스캔에 실패했습니다'))
     } finally {
       if (mounted.current) {
         setIsScanning(false)
