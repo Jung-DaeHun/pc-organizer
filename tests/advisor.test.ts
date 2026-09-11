@@ -11,7 +11,6 @@ import {
   MAX_NEW_FOLDERS,
   mergeAdviceIntoPlan,
   previewAdvice,
-  sanitizeFolderName,
   validateAdvice,
   type Advice
 } from '../src/main/services/advisor'
@@ -62,10 +61,9 @@ function rulePlan(items: OrganizeItem[], planItems?: PlanItem[]): OrganizePlan {
     folders: [],
     items: planItems ?? items.map((item) => ({
       item,
-      toDir: null,
+      toFolder: null,
       reason: '규칙 없음',
-      origin: 'rule',
-      approved: false
+      origin: 'rule' as const
     })),
     skipped: []
   }
@@ -132,21 +130,6 @@ describe('ADVICE_SCHEMA — AI 가 할 수 있는 일의 전부', () => {
 
 // ---------------------------------------------------------------- 응답 검증
 
-describe('sanitizeFolderName', () => {
-  it('윈도우에서 쓸 수 없는 이름을 거른다', () => {
-    expect(sanitizeFolderName('키보드 드라이버')).toBe('키보드 드라이버')
-    expect(sanitizeFolderName('  양끝 공백  ')).toBe('양끝 공백')
-
-    for (const bad of [
-      '', '   ', '.', '..', '../etc', 'a/b', 'a\\b', 'a:b', 'a*b', 'a?b', 'a"b', 'a<b', 'a>b', 'a|b',
-      'CON', 'con.txt', 'LPT1', 'com9.old', '.hidden', 'trailing.', 'ab',
-      'x'.repeat(61)
-    ]) {
-      expect(sanitizeFolderName(bad), JSON.stringify(bad)).toBeNull()
-    }
-  })
-})
-
 describe('validateAdvice', () => {
   const items = [file('setup.exe', { category: 'installer' }), file('poster.jpg'), dir('proj')]
   const request: AdvisorRequest = buildAdvisorRequest(ROOT, items, ['기존폴더'])
@@ -162,7 +145,9 @@ describe('validateAdvice', () => {
       request
     )
 
-    expect(v.folders).toEqual([{ name: '드라이버', description: '기기 드라이버', existing: false }])
+    expect(v.folders).toEqual([
+      { name: '드라이버', description: '기기 드라이버', existing: false, origin: 'ai' }
+    ])
     expect(v.assignments.get(setup.id)).toEqual({ folder: '드라이버', reason: '키보드 드라이버' })
     expect(v.leave.get(poster.id)).toBe('용도 불명')
     expect(v.dropped).toEqual([])
@@ -209,7 +194,7 @@ describe('validateAdvice', () => {
       request
     )
     expect(v.assignments.get(setup.id)?.folder).toBe('기존폴더')
-    expect(v.folders).toEqual([{ name: '기존폴더', description: '', existing: true }])
+    expect(v.folders).toEqual([{ name: '기존폴더', description: '', existing: true, origin: 'ai' }])
   })
 
   it('최상위 파일과 같은 이름의 폴더는 만들 수 없으니 버린다', () => {
@@ -226,9 +211,8 @@ describe('validateAdvice', () => {
     )
     expect(v.folders).toEqual([])
     expect(v.assignments.size).toBe(0)
-    expect(v.dropped.filter((d) => d.includes('같은 이름의 파일'))).toHaveLength(
-      process.platform === 'win32' ? 2 : 1
-    )
+    // 윈도우 전용 앱이라 대소문자만 다른 이름(POSTER.JPG)도 같은 파일로 본다
+    expect(v.dropped.filter((d) => d.includes('같은 이름의 파일'))).toHaveLength(2)
   })
 
   it('새 폴더는 상한까지만 받고 넘는 폴더와 그 배정은 버린다', () => {
@@ -273,8 +257,7 @@ describe('validateAdvice', () => {
     expect(v.leave.has(setup.id)).toBe(false)
   })
 
-  it('대소문자만 다른 폴더 이름은 하나로 합친다 (윈도우)', () => {
-    if (process.platform !== 'win32') return
+  it('대소문자만 다른 폴더 이름은 하나로 합친다', () => {
     const v = validateAdvice(
       advice({
         folders: [{ name: 'Photos', description: '' }, { name: 'photos', description: '' }],
@@ -294,13 +277,11 @@ describe('mergeAdviceIntoPlan', () => {
     const items = [file('a.exe', { category: 'installer' }), file('b.jpg'), file('c.txt')]
     const [a, b, c] = items as [OrganizeItem, OrganizeItem, OrganizeItem]
     const plan = rulePlan(items, [
-      { item: a, toDir: join(ROOT, '설치파일'), reason: '.exe → 설치파일', origin: 'rule', approved: true },
-      { item: b, toDir: null, reason: '규칙 없음', origin: 'rule', approved: false },
-      { item: c, toDir: null, reason: '규칙 없음', origin: 'rule', approved: false }
+      { item: a, toFolder: '설치파일', reason: '.exe → 설치파일', origin: 'rule' },
+      { item: b, toFolder: null, reason: '규칙 없음', origin: 'rule' },
+      { item: c, toFolder: null, reason: '규칙 없음', origin: 'rule' }
     ])
-    plan.folders = [
-      { name: '설치파일', dir: join(ROOT, '설치파일'), description: '확장자 규칙', existing: false }
-    ]
+    plan.folders = [{ name: '설치파일', description: '', existing: false, origin: 'rule' }]
 
     const request = buildAdvisorRequest(ROOT, items, [])
     const v = validateAdvice(
@@ -313,10 +294,10 @@ describe('mergeAdviceIntoPlan', () => {
     )
     const merged = mergeAdviceIntoPlan(plan, v)
 
-    expect(merged.items.map((p) => [p.item.name, p.toDir, p.origin, p.approved])).toEqual([
-      ['a.exe', join(ROOT, '설치파일'), 'rule', true],
-      ['b.jpg', join(ROOT, '포스터'), 'ai', true],
-      ['c.txt', null, 'ai', false]
+    expect(merged.items.map((p) => [p.item.name, p.toFolder, p.origin])).toEqual([
+      ['a.exe', '설치파일', 'rule'],
+      ['b.jpg', '포스터', 'ai'],
+      ['c.txt', null, 'ai']
     ])
     expect(merged.items[2]?.reason).toBe('메모로 보임')
     expect(merged.folders.map((f) => f.name)).toEqual(['포스터', '설치파일'])
@@ -339,11 +320,11 @@ describe('mergeAdviceIntoPlan', () => {
       { path: store.path, name: store.name, reason: 'destination', why: '정리 폴더(목적지)라 옮기지 않는다' }
     ])
     expect(merged.folders).toEqual([
-      { name: '아양로 호두과자', dir: join(ROOT, '아양로 호두과자'), description: '', existing: true }
+      { name: '아양로 호두과자', description: '', existing: true, origin: 'ai' }
     ])
   })
 
-  it('제안 폴더에는 main 이 만든 절대 경로가 실린다 — renderer 는 경로를 조립하지 않는다', () => {
+  it('계획은 목적지를 폴더 이름으로만 말한다 — 어디에도 경로가 없다', () => {
     const items = [file('a.jpg')]
     const plan = rulePlan(items)
     const request = buildAdvisorRequest(ROOT, items, [])
@@ -355,8 +336,9 @@ describe('mergeAdviceIntoPlan', () => {
       request
     )
     const merged = mergeAdviceIntoPlan(plan, v)
-    expect(merged.folders[0]?.dir).toBe(join(ROOT, '사진'))
-    expect(merged.items[0]?.toDir).toBe(join(ROOT, '사진'))
+    expect(merged.folders[0]).toEqual({ name: '사진', description: '', existing: false, origin: 'ai' })
+    expect(merged.items[0]?.toFolder).toBe('사진')
+    expect(JSON.stringify(merged.folders)).not.toMatch(/[\\/]/)
   })
 
   it('AI 가 폴더를 다른 폴더로 옮기라고 하면서 동시에 목적지로도 쓰면 옮기지 않는 쪽을 택한다', () => {

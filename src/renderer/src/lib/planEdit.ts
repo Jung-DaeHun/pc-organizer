@@ -1,0 +1,191 @@
+import type { OrganizePlan, PlanItem, ProposedFolder } from '@shared/types'
+import { folderKey, sanitizeFolderName } from '@shared/folderName'
+
+/**
+ * 칸반 보드가 계획(화면 사본)을 고칠 때 쓰는 순수 함수들.
+ *
+ * 전부 `OrganizePlan → OrganizePlan` 이고 입력을 바꾸지 않는다. 경로는 어디에도 없다 —
+ * 계획은 목적지를 폴더 이름으로만 말하고, 실제 경로는 실행 단계에서 main 이 만든다.
+ * 컴포넌트 테스트가 없는 프로젝트라, 판의 규칙은 여기에 모아 Vitest 로 검증한다.
+ */
+
+export interface KanbanColumn {
+  folder: ProposedFolder
+  items: PlanItem[]
+}
+
+export interface KanbanGroups {
+  /** 그대로 두는 항목 (toFolder === null) */
+  keep: PlanItem[]
+  /** plan.folders 순서 그대로. AI → 규칙 → 사용자 추가 순은 main 과 addFolder 가 그렇게 쌓는다 */
+  columns: KanbanColumn[]
+}
+
+export interface PlanSummary {
+  moving: number
+  movingBytes: number
+  staying: number
+  skipped: number
+  newFolders: number
+}
+
+export type EditResult = { ok: true; plan: OrganizePlan } | { ok: false; error: string }
+
+/** 크기 큰 순. 같으면 이름순으로 안정적으로 */
+const bySizeDesc = (a: PlanItem, b: PlanItem): number =>
+  b.item.size - a.item.size || a.item.name.localeCompare(b.item.name, 'ko')
+
+function findFolder(plan: OrganizePlan, name: string): ProposedFolder | undefined {
+  const key = folderKey(name)
+  return plan.folders.find((f) => folderKey(f.name) === key)
+}
+
+/** 열과 카드로 묶는다. 카드는 열 안에서 크기 큰 순 */
+export function groupByFolder(plan: OrganizePlan): KanbanGroups {
+  const buckets = new Map<string, PlanItem[]>()
+  for (const folder of plan.folders) buckets.set(folderKey(folder.name), [])
+
+  const keep: PlanItem[] = []
+  for (const planItem of plan.items) {
+    if (planItem.toFolder === null) {
+      keep.push(planItem)
+      continue
+    }
+    const bucket = buckets.get(folderKey(planItem.toFolder))
+    // 폴더 목록에 없는 이름을 가리키면 그대로 두기로 취급한다 (있어서는 안 되는 상태지만 카드를 잃지 않는다)
+    if (bucket) bucket.push(planItem)
+    else keep.push(planItem)
+  }
+
+  return {
+    keep: keep.sort(bySizeDesc),
+    columns: plan.folders.map((folder) => ({
+      folder,
+      items: (buckets.get(folderKey(folder.name)) ?? []).sort(bySizeDesc)
+    }))
+  }
+}
+
+/**
+ * 항목들을 폴더로(또는 null = 그대로 두기) 옮긴다. 사용자가 직접 정한 것이므로 origin 은 'user'.
+ * 모르는 폴더 이름이면 아무것도 바꾸지 않는다.
+ */
+export function moveItems(
+  plan: OrganizePlan,
+  ids: readonly string[],
+  toFolder: string | null
+): OrganizePlan {
+  const target = toFolder === null ? null : findFolder(plan, toFolder)
+  if (toFolder !== null && !target) return plan
+
+  const idSet = new Set(ids)
+  const nextName = target ? target.name : null
+  return {
+    ...plan,
+    items: plan.items.map((p) => {
+      if (!idSet.has(p.item.id) || p.toFolder === nextName) return p
+      return {
+        ...p,
+        toFolder: nextName,
+        // 폴더 이름은 넣지 않는다 — 나중에 폴더 이름을 바꿔도 이유가 낡지 않게
+        reason: nextName ? '직접 옮김' : '직접 그대로 두기로 정함',
+        origin: 'user'
+      }
+    })
+  }
+}
+
+type NameCheck = { ok: true; name: string } | { ok: false; error: string }
+
+/** 이름을 검증하고 이미 있는 폴더와 겹치지 않는지 본다. 실패 이유는 화면에 그대로 보여줄 문장 */
+function checkNewName(plan: OrganizePlan, raw: string, except?: string): NameCheck {
+  const name = sanitizeFolderName(raw)
+  if (!name) {
+    return { ok: false, error: '폴더 이름으로 쓸 수 없습니다 (\\ / : * ? " < > | 와 예약어, 끝의 점 금지)' }
+  }
+  const dup = findFolder(plan, name)
+  if (dup && (!except || folderKey(dup.name) !== folderKey(except))) {
+    return { ok: false, error: `'${dup.name}' 폴더가 이미 있습니다` }
+  }
+  // 루트에 같은 이름의 파일이 있으면 그 이름으로 폴더를 만들 수 없다
+  const fileClash = plan.items.some(
+    (p) => p.item.kind === 'file' && folderKey(p.item.name) === folderKey(name)
+  )
+  if (fileClash) return { ok: false, error: `'${name}' 이라는 파일이 있어 같은 이름의 폴더를 만들 수 없습니다` }
+  return { ok: true, name }
+}
+
+/** 사용자가 직접 폴더 열을 만든다. 맨 뒤에 붙는다 */
+export function addFolder(plan: OrganizePlan, raw: string): EditResult {
+  const checked = checkNewName(plan, raw)
+  if (!checked.ok) return checked
+  // 같은 이름의 폴더 항목(kind = dir)이 루트에 있으면 그건 '기존 폴더'다
+  const existing = plan.items.some(
+    (p) => p.item.kind === 'dir' && folderKey(p.item.name) === folderKey(checked.name)
+  )
+  const folder: ProposedFolder = { name: checked.name, description: '', existing, origin: 'user' }
+  return { ok: true, plan: { ...plan, folders: [...plan.folders, folder] } }
+}
+
+/** 새 폴더의 이름을 바꾼다. 기존 폴더(실제로 있는 폴더)는 못 바꾼다 */
+export function renameFolder(plan: OrganizePlan, from: string, raw: string): EditResult {
+  const folder = findFolder(plan, from)
+  if (!folder) return { ok: false, error: '없는 폴더입니다' }
+  if (folder.existing) return { ok: false, error: '이미 있는 폴더의 이름은 여기서 바꿀 수 없습니다' }
+
+  const checked = checkNewName(plan, raw, folder.name)
+  if (!checked.ok) return checked
+  if (checked.name === folder.name) return { ok: true, plan }
+
+  const fromKey = folderKey(folder.name)
+  return {
+    ok: true,
+    plan: {
+      ...plan,
+      folders: plan.folders.map((f) =>
+        folderKey(f.name) === fromKey ? { ...f, name: checked.name } : f
+      ),
+      items: plan.items.map((p) =>
+        p.toFolder !== null && folderKey(p.toFolder) === fromKey
+          ? { ...p, toFolder: checked.name }
+          : p
+      )
+    }
+  }
+}
+
+/** 빈 열만 지울 수 있다. 카드가 남아 있으면 거부 */
+export function removeFolder(plan: OrganizePlan, name: string): EditResult {
+  const folder = findFolder(plan, name)
+  if (!folder) return { ok: false, error: '없는 폴더입니다' }
+  const key = folderKey(folder.name)
+  if (plan.items.some((p) => p.toFolder !== null && folderKey(p.toFolder) === key)) {
+    return { ok: false, error: '카드가 남아 있는 폴더는 지울 수 없습니다. 먼저 카드를 옮기세요' }
+  }
+  return {
+    ok: true,
+    plan: { ...plan, folders: plan.folders.filter((f) => folderKey(f.name) !== key) }
+  }
+}
+
+/** 이 폴더로 가기로 한 항목을 전부 그대로 두기로 */
+export function keepAll(plan: OrganizePlan, name: string): OrganizePlan {
+  const key = folderKey(name)
+  const ids = plan.items
+    .filter((p) => p.toFolder !== null && folderKey(p.toFolder) === key)
+    .map((p) => p.item.id)
+  return moveItems(plan, ids, null)
+}
+
+export function summarize(plan: OrganizePlan): PlanSummary {
+  const moving = plan.items.filter((p) => p.toFolder !== null)
+  const usedKeys = new Set(moving.map((p) => folderKey(p.toFolder as string)))
+  return {
+    moving: moving.length,
+    movingBytes: moving.reduce((sum, p) => sum + p.item.size, 0),
+    staying: plan.items.length - moving.length,
+    skipped: plan.skipped.length,
+    // 카드가 하나도 안 가는 새 폴더는 실행해도 만들어지지 않으니 세지 않는다
+    newFolders: plan.folders.filter((f) => !f.existing && usedKeys.has(folderKey(f.name))).length
+  }
+}

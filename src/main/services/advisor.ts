@@ -1,4 +1,4 @@
-import { basename, join } from 'node:path'
+import { basename } from 'node:path'
 import { z } from 'zod'
 import type {
   AdvisorItem,
@@ -10,7 +10,7 @@ import type {
   ProposedFolder,
   SkippedItem
 } from '@shared/types'
-import { pathKey } from '../lib/paths'
+import { folderKey, sanitizeFolderName } from '@shared/folderName'
 import type { StructuredCall } from '../lib/structured'
 import { skippedItem } from './topLevel'
 
@@ -29,8 +29,6 @@ export const CHUNK_SIZE = 300
 
 /** 응답 토큰 상한. 300 항목 × (id + 폴더 + 이유) 에 넉넉하다 */
 export const MAX_OUTPUT_TOKENS = 16_000
-
-export const MAX_FOLDER_NAME_LENGTH = 60
 
 /**
  * 한 번의 추천에서 새로 만들 수 있는 폴더 수. 프롬프트는 8개 이하를 권하지만 그건 부탁이고,
@@ -148,30 +146,8 @@ export function estimateRequest(request: AdvisorRequest): AdvisorPreview {
 
 // ---------------------------------------------------------------- 응답 검증
 
-/** 윈도우 파일 이름에 못 쓰는 문자 */
-const FORBIDDEN_CHARS = /[\\/:*?"<>|]/
-/** 제어 문자(0x00-0x1f)도 못 쓴다. 정규식에 넣으면 no-control-regex 에 걸려 따로 본다 */
-const hasControlChar = (s: string): boolean => [...s].some((ch) => ch.charCodeAt(0) < 0x20)
-/** 확장자를 떼고 봐도 예약어면 안 된다 ('CON.txt' 도 못 만든다) */
-const RESERVED_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i
-
-/** 폴더 이름으로 쓸 수 있게 다듬는다. 못 쓰면 null */
-export function sanitizeFolderName(raw: string): string | null {
-  const name = raw.trim()
-  if (!name || name.length > MAX_FOLDER_NAME_LENGTH) return null
-  if (name === '.' || name === '..') return null
-  if (FORBIDDEN_CHARS.test(name) || hasControlChar(name)) return null
-  // 앞뒤의 점·공백은 윈도우가 잘라내 버려 다른 이름이 된다
-  if (/^[. ]|[. ]$/.test(name)) return null
-  if (RESERVED_NAMES.test(name.split('.')[0] ?? '')) return null
-  return name
-}
-
-/** 검증은 root 를 모르므로 경로 없이 이름만 든다. dir 은 계획에 얹을 때 붙는다 */
-export type AdvisedFolder = Omit<ProposedFolder, 'dir'>
-
 export interface ValidatedAdvice {
-  folders: AdvisedFolder[]
+  folders: ProposedFolder[]
   /** id -> 폴더 이름(정규화됨), 이유 */
   assignments: Map<string, { folder: string; reason: string }>
   /** id -> 이유 */
@@ -197,13 +173,13 @@ export function validateAdvice(advice: Advice, request: AdvisorRequest): Validat
 
   // 같은 이름의 **파일**이 루트에 있으면 그 이름으로 폴더를 만들 수 없다 (mkdir 이 EEXIST 로 터진다)
   const fileNameKeys = new Set(
-    request.items.filter((i) => i.kind === 'file').map((i) => pathKey(i.name))
+    request.items.filter((i) => i.kind === 'file').map((i) => folderKey(i.name))
   )
 
-  // 이름 비교는 pathKey 로 접어서 한다. '사진' 과 '사진 ' 은 같은 폴더가 아니지만
+  // 이름 비교는 folderKey 로 접어서 한다. '사진' 과 '사진 ' 은 같은 폴더가 아니지만
   // 'Photos' 와 'photos' 는 윈도우에서 같은 폴더다.
   const canonical = new Map<string, string>()
-  for (const name of request.existingFolders) canonical.set(pathKey(name), name)
+  for (const name of request.existingFolders) canonical.set(folderKey(name), name)
 
   const existingKeys = new Set(canonical.keys())
   let newFolderCount = 0
@@ -214,14 +190,15 @@ export function validateAdvice(advice: Advice, request: AdvisorRequest): Validat
       result.dropped.push(`폴더 이름을 쓸 수 없음: ${JSON.stringify(folder.name)}`)
       continue
     }
-    const key = pathKey(name)
+    const key = folderKey(name)
     if (canonical.has(key)) {
       // 이미 알고 있는 이름이면 원래 표기를 유지한다
-      if (!result.folders.some((f) => pathKey(f.name) === key)) {
+      if (!result.folders.some((f) => folderKey(f.name) === key)) {
         result.folders.push({
           name: canonical.get(key) as string,
           description: folder.description,
-          existing: existingKeys.has(key)
+          existing: existingKeys.has(key),
+          origin: 'ai'
         })
       }
       continue
@@ -236,7 +213,7 @@ export function validateAdvice(advice: Advice, request: AdvisorRequest): Validat
     }
     newFolderCount += 1
     canonical.set(key, name)
-    result.folders.push({ name, description: folder.description, existing: false })
+    result.folders.push({ name, description: folder.description, existing: false, origin: 'ai' })
   }
 
   for (const assignment of advice.assignments) {
@@ -250,18 +227,18 @@ export function validateAdvice(advice: Advice, request: AdvisorRequest): Validat
       continue
     }
     const name = sanitizeFolderName(assignment.folder)
-    const folder = name ? canonical.get(pathKey(name)) : undefined
+    const folder = name ? canonical.get(folderKey(name)) : undefined
     if (!folder) {
       result.dropped.push(`모르는 폴더로 배정: ${item.name} → ${JSON.stringify(assignment.folder)}`)
       continue
     }
-    if (item.kind === 'dir' && pathKey(item.name) === pathKey(folder)) {
+    if (item.kind === 'dir' && folderKey(item.name) === folderKey(folder)) {
       result.dropped.push(`자기 자신으로 이동: ${item.name}`)
       continue
     }
     // 기존 폴더인데 folders 에 안 적혔으면 여기서 채워 넣는다
-    if (!result.folders.some((f) => pathKey(f.name) === pathKey(folder))) {
-      result.folders.push({ name: folder, description: '', existing: true })
+    if (!result.folders.some((f) => folderKey(f.name) === folderKey(folder))) {
+      result.folders.push({ name: folder, description: '', existing: true, origin: 'ai' })
     }
     result.assignments.set(assignment.id, { folder, reason: assignment.reason })
   }
@@ -286,7 +263,7 @@ export function validateAdvice(advice: Advice, request: AdvisorRequest): Validat
 export function mergeValidated(a: ValidatedAdvice, b: ValidatedAdvice): ValidatedAdvice {
   const folders = [...a.folders]
   for (const folder of b.folders) {
-    if (!folders.some((f) => pathKey(f.name) === pathKey(folder.name))) folders.push(folder)
+    if (!folders.some((f) => folderKey(f.name) === folderKey(folder.name))) folders.push(folder)
   }
   const assignments = new Map(a.assignments)
   for (const [id, value] of b.assignments) if (!assignments.has(id)) assignments.set(id, value)
@@ -313,24 +290,18 @@ export function mergeAdviceIntoPlan(plan: OrganizePlan, advice: ValidatedAdvice)
     const assigned = advice.assignments.get(item.id)
 
     if (assigned) {
-      usedFolderKeys.add(pathKey(assigned.folder))
-      draft.push({
-        item,
-        toDir: join(plan.root, assigned.folder),
-        reason: assigned.reason,
-        origin: 'ai',
-        approved: true
-      })
+      usedFolderKeys.add(folderKey(assigned.folder))
+      draft.push({ item, toFolder: assigned.folder, reason: assigned.reason, origin: 'ai' })
       continue
     }
 
     const leaveReason = advice.leave.get(item.id)
     if (leaveReason !== undefined) {
-      draft.push({ item, toDir: null, reason: leaveReason, origin: 'ai', approved: false })
+      draft.push({ item, toFolder: null, reason: leaveReason, origin: 'ai' })
       continue
     }
 
-    if (planItem.toDir) usedFolderKeys.add(pathKey(basename(planItem.toDir)))
+    if (planItem.toFolder) usedFolderKeys.add(folderKey(planItem.toFolder))
     draft.push(planItem)
   }
 
@@ -339,7 +310,7 @@ export function mergeAdviceIntoPlan(plan: OrganizePlan, advice: ValidatedAdvice)
   const skipped: SkippedItem[] = [...plan.skipped]
   for (const planItem of draft) {
     const { item } = planItem
-    if (item.kind === 'dir' && usedFolderKeys.has(pathKey(item.name))) {
+    if (item.kind === 'dir' && usedFolderKeys.has(folderKey(item.name))) {
       skipped.push(skippedItem(item.path, item.name, 'destination'))
       continue
     }
@@ -348,13 +319,11 @@ export function mergeAdviceIntoPlan(plan: OrganizePlan, advice: ValidatedAdvice)
 
   // 제안 폴더 = AI 폴더 + 아직 규칙 항목이 쓰는 폴더. 실제로 쓰이는 것만 남긴다
   const folders: ProposedFolder[] = []
-  const pushFolder = (folder: AdvisedFolder): void => {
-    if (!folders.some((f) => pathKey(f.name) === pathKey(folder.name))) {
-      folders.push({ ...folder, dir: join(plan.root, folder.name) })
-    }
+  const pushFolder = (folder: ProposedFolder): void => {
+    if (!folders.some((f) => folderKey(f.name) === folderKey(folder.name))) folders.push(folder)
   }
-  for (const folder of advice.folders) if (usedFolderKeys.has(pathKey(folder.name))) pushFolder(folder)
-  for (const folder of plan.folders) if (usedFolderKeys.has(pathKey(folder.name))) pushFolder(folder)
+  for (const folder of advice.folders) if (usedFolderKeys.has(folderKey(folder.name))) pushFolder(folder)
+  for (const folder of plan.folders) if (usedFolderKeys.has(folderKey(folder.name))) pushFolder(folder)
 
   return { ...plan, folders, items, skipped }
 }
@@ -368,7 +337,7 @@ function existingFolderNames(plan: OrganizePlan): string[] {
 
   const seen = new Set<string>()
   return names.filter((name) => {
-    const key = pathKey(name)
+    const key = folderKey(name)
     if (seen.has(key)) return false
     seen.add(key)
     return true
@@ -401,11 +370,11 @@ export async function advisePlan(plan: OrganizePlan, call: StructuredCall): Prom
     const validated = validateAdvice(advice, request)
     merged = mergeValidated(merged, validated)
 
-    const knownKeys = new Set(known.map(pathKey))
+    const knownKeys = new Set(known.map(folderKey))
     for (const folder of validated.folders) {
-      if (!knownKeys.has(pathKey(folder.name))) {
+      if (!knownKeys.has(folderKey(folder.name))) {
         known = [...known, folder.name]
-        knownKeys.add(pathKey(folder.name))
+        knownKeys.add(folderKey(folder.name))
       }
     }
   }

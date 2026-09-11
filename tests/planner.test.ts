@@ -56,8 +56,8 @@ describe('buildRulePlan', () => {
       OPTS
     )
 
-    expect(plan.items.map((p) => p.toDir)).toEqual([join(ROOT, '설치파일'), join(ROOT, '이미지')])
-    expect(plan.items.every((p) => p.origin === 'rule' && p.approved)).toBe(true)
+    expect(plan.items.map((p) => p.toFolder)).toEqual(['설치파일', '이미지'])
+    expect(plan.items.every((p) => p.origin === 'rule')).toBe(true)
     expect(plan.folders.map((f) => f.name)).toEqual(['이미지', '설치파일']) // 카테고리 순서
   })
 
@@ -68,8 +68,7 @@ describe('buildRulePlan', () => {
       OPTS
     )
 
-    expect(plan.items.map((p) => p.toDir)).toEqual([null, null, null])
-    expect(plan.items.every((p) => !p.approved)).toBe(true)
+    expect(plan.items.map((p) => p.toFolder)).toEqual([null, null, null])
     expect(plan.items[0]?.reason).toContain('.xyz')
     expect(plan.items[1]?.reason).toContain('확장자 없음')
     expect(plan.items[2]?.reason).toContain('폴더')
@@ -86,7 +85,7 @@ describe('buildRulePlan', () => {
     expect(plan.items.map((p) => p.item.name)).toEqual(['setup.exe'])
     expect(plan.skipped.map((s) => [s.name, s.reason])).toEqual([['설치파일', 'destination']])
     expect(plan.folders).toEqual([
-      { name: '설치파일', dir: join(ROOT, '설치파일'), description: '확장자 규칙', existing: true }
+      { name: '설치파일', description: '', existing: true, origin: 'rule' }
     ])
   })
 
@@ -99,8 +98,7 @@ describe('buildRulePlan', () => {
     )
 
     const setup = plan.items.find((p) => p.item.name === 'setup.exe')
-    expect(setup?.toDir).toBeNull()
-    expect(setup?.approved).toBe(false)
+    expect(setup?.toFolder).toBeNull()
     expect(setup?.reason).toContain('같은 이름의 폴더를 만들 수 없다')
     expect(plan.folders.map((f) => f.name)).toEqual(['이미지'])
   })

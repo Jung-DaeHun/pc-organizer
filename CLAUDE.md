@@ -139,9 +139,18 @@ src/renderer/   React UI. Node 권한 없음. App 이 view 상태로 Dashboard /
 스캔인지 확인한 뒤에만 응한다. 대상은 감시 폴더 **바로 아래**의 파일과 폴더(통째로)뿐이다
 (`topLevel.ts` — 루트 한 단계만 `readdir`, 폴더 용량은 `lastEntries`를 경로 접두로 집계).
 `planner.ts`가 확장자 규칙으로 초안을 만들고 `advisor.ts`가 그 위에 AI 추천을 얹는다.
-`OrganizePlan`은 유한한 목록이라 renderer로 넘기지만, 실행(B)은 renderer가 돌려보낸 `{id, toDir}`를
+`OrganizePlan`은 유한한 목록이라 renderer로 넘기지만, 실행(B)은 renderer가 돌려보낸 `{id, toFolder}`를
 `lastPlan`과 대조한 뒤에만 한다. 클라우드 전용 파일·링크·`desktop.ini`·`.lnk`·`.url`은 계획에서
-뺀다(`skipped`에 이유와 함께).
+뺀다(`skipped`에 이유 코드와 함께).
+
+**계획은 목적지를 폴더 이름으로만 말한다.** `PlanItem.toFolder`는 root 바로 아래 폴더의 이름이고
+경로가 아니다. renderer는 경로를 한 번도 조립하지 않으며, 실제 경로는 실행 단계에서 main이
+`join(root, toFolder, item.name)`으로 만든다. 폴더 이름 규칙(`sanitizeFolderName`, `folderKey`)은
+`src/shared/folderName.ts` 한 곳에 있어 AI 응답 검증과 사용자가 직접 만든 폴더가 같은 검사를 받는다.
+
+**계획 화면은 칸반 보드다.** 폴더 = 열, 항목 = 카드. 카드가 있는 열이 곧 결정이라 승인 체크박스는
+없다(`그대로 두기` 열 = 옮기지 않음). 판 편집 규칙은 `renderer/src/lib/planEdit.ts`의 순수 함수에
+모여 있고 `tests/planEdit.test.ts`가 검증한다. 드래그는 네이티브 HTML5 DnD(의존성 없음).
 
 **서비스는 `electron`을 import 하지 않는다.** 그래야 Vitest에서 그대로 돌고 나중에
 `worker_threads`로 옮길 수 있다. `store.ts`만 예외다(`app.getPath`). 앱 경로 같은 값은 import가

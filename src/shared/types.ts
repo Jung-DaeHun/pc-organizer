@@ -233,27 +233,32 @@ export interface SkippedItem {
   why: string
 }
 
-/** 계획이 제안하는 목적지 폴더. 감시 폴더 바로 아래에 만들어진다 */
+/** 누가 이 폴더/배정을 제안했는지 */
+export type PlanOrigin = 'rule' | 'ai' | 'user'
+
+/**
+ * 계획이 제안하는 목적지 폴더. 감시 폴더 바로 아래에 만들어진다.
+ *
+ * 경로는 없다 — 계획은 목적지를 **폴더 이름**으로만 말한다. 실제 경로는 실행 단계에서 main 이
+ * `join(root, name, item.name)` 으로 만든다. renderer 는 경로를 한 번도 조립하지 않는다.
+ */
 export interface ProposedFolder {
   name: string
-  /** 절대 경로 (= join(root, name)). renderer 가 경로를 조립하지 않도록 main 이 만들어 보낸다 */
-  dir: string
   description: string
-  /** 이미 감시 폴더 안에 있는 폴더인지 */
+  /** 이미 감시 폴더 안에 있는 폴더인지 (이름을 바꿀 수 없다) */
   existing: boolean
+  origin: PlanOrigin
 }
 
 export interface PlanItem {
   item: OrganizeItem
   /**
-   * 옮겨 넣을 폴더의 절대 경로. 항상 계획의 root 바로 아래다. null 이면 그대로 둔다.
-   * 파일 이름은 바뀌지 않는다 — 실제 목적지는 join(toDir, item.name).
+   * 옮겨 넣을 폴더 이름 (계획의 root 바로 아래). null 이면 그대로 둔다.
+   * 파일 이름은 바뀌지 않는다 — 실제 목적지는 join(root, toFolder, item.name).
    */
-  toDir: string | null
+  toFolder: string | null
   reason: string
-  origin: 'rule' | 'ai'
-  /** 사용자가 실행 대상으로 체크했는지 */
-  approved: boolean
+  origin: PlanOrigin
 }
 
 export interface OrganizePlan {
