@@ -2,7 +2,10 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { isCloudOnly, scanFolder } from '../src/main/services/scanner'
+import type { FileEntry } from '@shared/types'
+import { hashHead } from '../src/main/lib/hash'
+import { findDuplicates } from '../src/main/services/opportunities'
+import { isCloudOnly, mergeEntries, scanFolder, scanFolders } from '../src/main/services/scanner'
 
 /**
  * 픽스처는 describe 밖에서 미리 만든다.
@@ -57,11 +60,12 @@ describe('isCloudOnly', () => {
   })
 })
 
-describe('scanFolder', () => {
-  afterAll(async () => {
-    await rm(root, { recursive: true, force: true })
-  })
+// 픽스처를 여러 describe가 같이 쓰므로 파일 전체가 끝난 뒤에 지운다
+afterAll(async () => {
+  await rm(root, { recursive: true, force: true })
+})
 
+describe('scanFolder', () => {
   it('하위 폴더까지 재귀적으로 훑는다', async () => {
     const scan = await scanFolder(root, { excludedDirNames: ['node_modules'] })
     const names = scan.entries.map((e) => e.name).sort()
@@ -122,5 +126,80 @@ describe('scanFolder', () => {
     })
 
     expect(seen.at(-1)).toBe(5)
+  })
+})
+
+describe('mergeEntries', () => {
+  const nested = join(root, 'nested')
+
+  it('감시 폴더가 포함 관계여도 같은 파일을 한 번만 센다', async () => {
+    // '바탕화면'이 등록된 상태에서 '바탕화면\프로젝트'를 추가하는 건 흔한 조작이다.
+    // 하위 트리가 두 폴더에서 각각 잡히므로 그대로 이어 붙이면 파일 수와 용량이 그만큼 부푼다.
+    const scans = await scanFolders([root, nested], { excludedDirNames: ['node_modules'] })
+
+    // 폴더별 결과는 각 폴더의 실제 내용 그대로 (root 5개 + nested 2개)
+    expect(scans.flatMap((s) => s.entries)).toHaveLength(7)
+
+    const merged = mergeEntries(scans)
+    expect(merged).toHaveLength(5)
+    expect(new Set(merged.map((e) => e.path)).size).toBe(5)
+  })
+
+  it('겹친 파일이 자기 자신과 중복 후보로 묶이지 않는다', async () => {
+    // 같은 경로가 두 번 들어가면 크기도 해시도 같으니 진짜 중복이 없어도
+    // 파일마다 1개분씩 '지울 수 있는 양'으로 잡혔다.
+    const scans = await scanFolders([root, nested], { excludedDirNames: ['node_modules'] })
+
+    const naive = await findDuplicates(
+      scans.flatMap((s) => s.entries),
+      hashHead
+    )
+    expect(naive.count).toBe(2)
+
+    const deduped = await findDuplicates(mergeEntries(scans), hashHead)
+    expect(deduped.count).toBe(0)
+    expect(deduped.bytes).toBe(0)
+  })
+
+  it('먼저 나온 폴더의 항목을 남긴다', () => {
+    const first: FileEntry = {
+      path: join(root, 'x.bin'),
+      name: 'x.bin',
+      ext: '.bin',
+      size: 1,
+      mtimeMs: 0,
+      atimeMs: 0,
+      category: 'other',
+      isCloudOnly: false
+    }
+    const second = { ...first, size: 2 }
+
+    const merged = mergeEntries([
+      { path: root, entries: [first], skippedCount: 0 },
+      { path: root, entries: [second], skippedCount: 0 }
+    ])
+
+    expect(merged).toEqual([first])
+  })
+
+  it.skipIf(process.platform !== 'win32')('윈도우에서는 대소문자만 다른 경로도 같은 파일이다', () => {
+    const lower: FileEntry = {
+      path: join(root, 'photo.png'),
+      name: 'photo.png',
+      ext: '.png',
+      size: 1,
+      mtimeMs: 0,
+      atimeMs: 0,
+      category: 'image',
+      isCloudOnly: false
+    }
+    const upper = { ...lower, path: join(root, 'PHOTO.PNG'), name: 'PHOTO.PNG' }
+
+    const merged = mergeEntries([
+      { path: root, entries: [lower], skippedCount: 0 },
+      { path: root.toUpperCase(), entries: [upper], skippedCount: 0 }
+    ])
+
+    expect(merged).toHaveLength(1)
   })
 })

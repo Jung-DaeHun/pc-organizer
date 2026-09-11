@@ -2,6 +2,7 @@ import { lstat, opendir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Stats } from 'node:fs'
 import type { FileEntry, ScanProgress } from '@shared/types'
+import { pathKey } from '../lib/paths'
 import { categorize, extensionOf } from './categorize'
 
 /** 파일 몇 개마다 진행률을 흘려보낼지. 너무 잦으면 IPC가 오히려 스캔을 느리게 만든다. */
@@ -50,6 +51,34 @@ export async function scanFolders(roots: string[], options: ScanOptions = {}): P
   }
 
   return results
+}
+
+/**
+ * 여러 폴더의 스캔 결과를 한 목록으로 합친다. 같은 파일은 한 번만 넣는다.
+ *
+ * 감시 폴더가 서로 포함 관계이면(바탕화면 + 바탕화면\프로젝트) 하위 트리의 파일이
+ * 두 폴더에서 각각 잡힌다. 그대로 이어 붙이면 전체 파일 수와 용량이 그만큼 부풀고,
+ * 크기도 해시도 같은 자기 자신과 '중복 후보'로 묶여 지울 수 있는 양이 거짓이 된다.
+ *
+ * 폴더를 등록할 때 포함 관계를 막는 대신 여기서 거르는 이유: 루트 A와, A의 제외 폴더
+ * 아래에 있는 B처럼 포함 관계이면서도 실제로는 겹치지 않는 조합이 있다.
+ * 폴더별 요약은 각 폴더의 실제 내용을 보여줘야 하므로 FolderScan은 그대로 두고
+ * 전체 집계에 쓰는 목록만 여기서 합친다.
+ */
+export function mergeEntries(scans: FolderScan[]): FileEntry[] {
+  const seen = new Set<string>()
+  const merged: FileEntry[] = []
+
+  for (const scan of scans) {
+    for (const entry of scan.entries) {
+      const key = pathKey(entry.path)
+      if (seen.has(key)) continue
+      seen.add(key)
+      merged.push(entry)
+    }
+  }
+
+  return merged
 }
 
 /**

@@ -1,6 +1,6 @@
 import type { FileEntry, Opportunities, ScanProgress, ScanResult } from '@shared/types'
 import { hashHead } from '../lib/hash'
-import { scanFolders } from './scanner'
+import { mergeEntries, scanFolders } from './scanner'
 import {
   findDuplicates,
   selectLarge,
@@ -35,7 +35,8 @@ export async function runScan(onProgress?: (progress: ScanProgress) => void): Pr
     onProgress
   })
 
-  const entries = scans.flatMap((scan) => scan.entries)
+  // 감시 폴더가 겹치면 같은 파일이 두 폴더에서 잡힌다. 집계와 중복 검사는 한 번씩만 센다.
+  const entries = mergeEntries(scans)
   lastEntries = entries
 
   // 중복 후보 해시와 임시 폴더 계산은 서로 무관하니 같이 돌린다

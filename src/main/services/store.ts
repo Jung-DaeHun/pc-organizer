@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
 import type { Settings } from '@shared/types'
+import { pathKey } from '../lib/paths'
 
 const MB = 1024 * 1024
 
@@ -43,6 +44,17 @@ function settingsPath(): string {
   return join(app.getPath('userData'), 'settings.json')
 }
 
+/** 같은 폴더를 가리키는 경로를 하나로 줄인다. 먼저 나온 표기를 남긴다. */
+function uniqueFolders(folders: string[]): string[] {
+  const seen = new Set<string>()
+  return folders.filter((folder) => {
+    const key = pathKey(folder)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 let cache: Settings | null = null
 
 /** 저장된 설정을 읽는다. 파일이 없거나 깨졌으면 기본값으로 시작한다. */
@@ -75,8 +87,8 @@ export async function updateSettings(patch: Partial<Settings>): Promise<Settings
   const current = await getSettings()
   const next: Settings = { ...current, ...patch }
 
-  // 같은 폴더가 두 번 들어가면 스캔도 두 번 돈다
-  next.watchedFolders = [...new Set(next.watchedFolders)]
+  // 같은 폴더가 두 번 들어가면 스캔도 두 번 돈다. 대소문자만 다른 경로도 같은 폴더다.
+  next.watchedFolders = uniqueFolders(next.watchedFolders)
 
   cache = next
 
