@@ -220,10 +220,10 @@ describe('resolveMoves — 요청을 계획과 대조', () => {
     expect(move?.to).toBe(join(ROOT, 'proj', 'a.pdf'))
   })
 
-  it('루트에 있는 파일·바로가기 이름은 목적지로 쓸 수 없다 (mkdir 이 실패한다)', () => {
+  it('루트에 있는 파일 이름은 skipped 에 간 것이라도 목적지로 쓸 수 없다 (mkdir 이 실패한다)', () => {
     expect(() => resolveMoves(BASE, [{ id: '0', toFolder: 'b.zip' }])).toThrow('파일이 이미 있어')
-    const withShortcut = plan([planItem(A)], [skipped('메모', 'shortcut')])
-    expect(() => resolveMoves(withShortcut, [{ id: '0', toFolder: '메모' }])).toThrow(
+    const withSkippedFile = plan([planItem(A)], [skipped('메모', 'not-in-scan')])
+    expect(() => resolveMoves(withSkippedFile, [{ id: '0', toFolder: '메모' }])).toThrow(
       '파일이 이미 있어'
     )
   })

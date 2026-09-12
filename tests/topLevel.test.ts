@@ -79,7 +79,7 @@ describe('listTopLevel', () => {
     }
   })
 
-  it('링크·시스템 파일·바로가기·클라우드 전용은 이유와 함께 뺀다', async () => {
+  it('링크·시스템 파일·클라우드 전용은 이유와 함께 빼고, 바로가기(.lnk·.url)는 정리 대상이다', async () => {
     const entries = [
       entry('cloud.mp4', { isCloudOnly: true, size: 5_000_000 }),
       entry('desktop.ini'),
@@ -101,15 +101,13 @@ describe('listTopLevel', () => {
       ])
     )
 
-    // 인터넷 바로가기(.url)는 정리 대상이다. 앱 바로가기(.lnk)만 뺀다
-    expect(listing.items.map((i) => i.name)).toEqual(['ok.jpg', 'site.url'])
+    expect(listing.items.map((i) => i.name)).toEqual(['game.lnk', 'ok.jpg', 'site.url'])
 
     const reason = Object.fromEntries(listing.skipped.map((s) => [s.name, s.reason]))
     expect(reason).toEqual({
       junction: 'link',
       'cloud.mp4': 'cloud-only',
       'desktop.ini': 'system',
-      'game.lnk': 'shortcut',
       weird: 'not-file-or-dir'
     })
     // 화면 문구도 같이 실려 간다

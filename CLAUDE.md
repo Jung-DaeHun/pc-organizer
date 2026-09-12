@@ -172,8 +172,8 @@ src/renderer/   React UI. Node 권한 없음. App 이 view 상태로 Dashboard /
 (`topLevel.ts` — 루트 한 단계만 `readdir`, 폴더 용량은 `lastEntries`를 경로 접두로 집계).
 `planner.ts`가 확장자 규칙으로 초안을 만들고 `advisor.ts`가 그 위에 AI 추천을 얹는다.
 `OrganizePlan`은 유한한 목록이라 renderer로 넘기지만, 실행은 renderer가 돌려보낸 `{id, toFolder}`를
-`lastPlan`과 대조한 뒤에만 한다. 클라우드 전용 파일·링크·`desktop.ini`·`.lnk`(앱 바로가기)는 계획에서
-뺀다(`skipped`에 이유 코드와 함께). `.url`(인터넷 바로가기)은 정리 대상이다 — 어디로 옮겨도 그대로 열린다.
+`lastPlan`과 대조한 뒤에만 한다. 클라우드 전용 파일·링크·`desktop.ini`는 계획에서 뺀다(`skipped`에 이유
+코드와 함께). 바로가기(`.lnk`·`.url`)는 정리 대상이다 — 어디로 옮겨도 그대로 열린다.
 
 **실행** — `plan.ts`의 `executeApproved(requests, {io, journalPath, onProgress})`가 조율한다.
 `executor.ts`의 `resolveMoves`(계획 대조) → `preflight`(읽기 전용 점검, 하나라도 걸리면 `blocked`) →
@@ -203,7 +203,7 @@ renderer 는 `usePlan.execute` → `ExecuteDialog`(확인 → 진행 → 결과)
 판도 main과 같은 규칙을 지킨다 — **목적지로 쓰이는 폴더는 옮기지 않는다.** 열과 같은 이름의 폴더
 카드는 그 열 자체라 옮길 수 없고(`isDestinationDir`, 카드에 '정리 폴더' 배지), 이미 다른 열로 보낸
 폴더 카드의 이름으로는 열을 만들 수 없다. 열 이름은 `skipped`에 간 이름과도 대조한다(폴더면
-'기존 폴더', 파일·링크·바로가기면 거부 — 실행 단계의 `mkdir`이 `EEXIST`로 터지지 않게).
+'기존 폴더', 파일·링크면 거부 — 실행 단계의 `mkdir`이 `EEXIST`로 터지지 않게).
 
 **서비스는 `electron`을 import 하지 않는다.** 그래야 Vitest에서 그대로 돌고 나중에
 `worker_threads`로 옮길 수 있다. `store.ts`만 예외다(`app.getPath`). 앱 경로 같은 값은 import가

@@ -63,7 +63,7 @@ function plan(
     items,
     skipped:
       typeof skippedItems === 'number'
-        ? Array.from({ length: skippedItems }, (_, i) => skipped(`s${i}`, 'shortcut'))
+        ? Array.from({ length: skippedItems }, (_, i) => skipped(`s${i}`, 'not-in-scan'))
         : skippedItems
   }
 }
@@ -210,12 +210,12 @@ describe('addFolder', () => {
     expect(r2.ok && r2.plan.folders[1]?.existing).toBe(true)
   })
 
-  it('skipped 에 간 이름도 본다 — 폴더면 기존 폴더, 파일·링크·바로가기면 거부', () => {
+  it('skipped 에 간 이름도 본다 — 폴더면 기존 폴더, 파일·링크면 거부', () => {
     const p = plan([], [], [
       skipped('사진', 'has-cloud-only'),
       skipped('node_modules', 'excluded-dir'),
       skipped('문서', 'destination'),
-      skipped('메모.lnk', 'shortcut'),
+      skipped('메모.tmp', 'not-in-scan'),
       skipped('desktop.ini', 'system'),
       skipped('연결', 'link'),
       skipped('받는중.pdf', 'cloud-only')
@@ -224,7 +224,7 @@ describe('addFolder', () => {
       const r = addFolder(p, dir)
       expect(r.ok && r.plan.folders[0]?.existing, dir).toBe(true)
     }
-    for (const bad of ['메모.lnk', 'desktop.ini', '연결', '받는중.pdf']) {
+    for (const bad of ['메모.tmp', 'desktop.ini', '연결', '받는중.pdf']) {
       const r = addFolder(p, bad)
       expect(r.ok, bad).toBe(false)
       if (!r.ok) expect(r.error, bad).toContain(bad)

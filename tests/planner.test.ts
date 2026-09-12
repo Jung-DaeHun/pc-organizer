@@ -115,7 +115,7 @@ describe('buildRulePlan', () => {
   })
 
   it('앞 단계에서 뺀 항목은 그대로 이어받는다', () => {
-    const skipped = [skippedItem(join(ROOT, 'x.lnk'), 'x.lnk', 'shortcut')]
+    const skipped = [skippedItem(join(ROOT, 'desktop.ini'), 'desktop.ini', 'system')]
     const plan = buildRulePlan(ROOT, listing([], skipped), OPTS)
 
     expect(plan.skipped).toEqual(skipped)

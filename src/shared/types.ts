@@ -205,7 +205,6 @@ export type SkipReason =
   | 'link'
   | 'not-file-or-dir'
   | 'system'
-  | 'shortcut'
   | 'not-in-scan'
   | 'cloud-only'
   | 'has-cloud-only'
@@ -216,7 +215,6 @@ export const SKIP_REASON_LABELS: Record<SkipReason, string> = {
   link: '링크·정션은 따라가지 않는다',
   'not-file-or-dir': '파일도 폴더도 아님',
   system: '시스템 파일',
-  shortcut: '바로가기',
   'not-in-scan': '스캔 결과에 없음 (다시 스캔 필요)',
   'cloud-only': '클라우드 전용 파일 (내려받기 전에는 옮기지 않는다)',
   'has-cloud-only': '클라우드 전용 파일이 들어 있는 폴더',
