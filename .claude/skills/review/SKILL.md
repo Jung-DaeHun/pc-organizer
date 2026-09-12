@@ -45,18 +45,56 @@ grep -n "contextIsolation\|nodeIntegration\|sandbox\|webSecurity" src/main/index
 grep -rn "from 'node:\|require(\|from 'electron'" src/renderer/
 ```
 
-### 2-2. 계획 세우기까지는 조회 전용 — 쓰기 금지
+### 2-2. 사용자 파일을 움직이는 건 executor.ts 의 rename 뿐 — 사용자 파일을 지우는 코드 금지
 
-스캔·계획·AI 추천은 사용자 파일을 바꾸는 코드가 **한 줄도 없어야 한다**. 스캔 결과가 정확하다는
-확신이 서기 전에 되돌릴 수 없는 동작을 붙이면, 버그 하나가 곧바로 사용자 파일 손실이 된다.
+스캔·계획·AI 추천은 사용자 파일을 바꾸는 코드가 **한 줄도 없어야 한다**. 실행(B1)이 들어온 뒤에도
+사용자 파일에 쓰는 로직은 `services/executor.ts` 하나이고, 하는 일은 `mkdir`·`rename`, 그리고 실행취소가
+자기가 만든 **빈** 폴더를 치우는 `rmdir`(비재귀) 셋뿐이다.
+
+**사용자 파일을 지우는 호출은 어디에도 없어야 한다.** 하나라도 나오면 치명.
 
 ```bash
-grep -rn "writeFile\|unlink\|rmdir\|rm(\|rename\|copyFile\|mkdir\|trashItem\|shell.moveItemToTrash" src/main/services/ src/main/ipc/ src/main/lib/
+grep -rn "unlink\|rm(\|rmSync\|copyFile\|trashItem\|shell.moveItemToTrash" src/main/
 ```
 
-허용되는 예외는 `store.ts`의 `userData` 아래 두 파일(`settings.json`, `secrets.json`) 저장뿐이다.
-`topLevel.ts`의 `readdir`/`lstat`은 조회다. 그 밖에 사용자 파일을 건드리는 호출이 있으면 보고한다.
-레지스트리도 마찬가지로 조회만 해야 한다 — `Set-ItemProperty`, `Remove-Item`, `New-Item`이 있으면 보고.
+`rmdir`은 `executor.ts`(undoMoves, `createdFolders` 만)와 `handlers.ts`(io 배선)에만 있어야 하고
+**옵션 없이** 불러야 한다. `recursive`가 붙어 있으면 치명 — 비어 있지 않은 폴더가 통째로 지워진다.
+
+```bash
+grep -rn "rmdir" src/main/
+grep -rn "recursive" src/main/ | grep -v "mkdir"
+```
+
+쓰기 호출은 아래 위치에만 있어야 한다. 그 밖의 파일에서 나오면 보고한다.
+
+```bash
+grep -rn "writeFile\|rename\|mkdir" src/main/services/ src/main/ipc/ src/main/lib/
+```
+
+- `store.ts` — `userData/settings.json`·`secrets.json` (`writeFile`, `mkdir`)
+- `journal.ts` — `userData/journal.json` (`writeFile` 임시 파일 → `rename`, `mkdir`)
+- `handlers.ts` — `node:fs/promises`의 `lstat`/`mkdir`/`rename`/`rmdir`으로 `ExecutorIo`를 **만들기만** 한다
+- `executor.ts` — `io.mkdir`/`io.rename`/`io.rmdir` 호출. **`node:fs`를 import 하지 않는다** (아래로 확인)
+
+```bash
+grep -n "from 'node:fs" src/main/services/executor.ts src/main/services/undo.ts src/main/services/plan.ts
+```
+
+실행기 자체도 확인한다:
+- `resolveMoves`가 요청을 `lastPlan`과 대조하는가 — 경로는 요청이 아니라 계획에서 오고, `toFolder`는
+  `sanitizeFolderName`을 다시 거치며, 옮기는 항목 이름·파일 이름과 겹치는 목적지는 전체 거부
+- `preflight`가 하나라도 걸리면 아무것도 옮기지 않는가 (`blocked`)
+- `checkMove`가 목적지 폴더의 `isSymbolicLink()`를 보는가 (정션인 목적지로 흘러가지 않게)
+- 목적지에 같은 이름이 있으면 `exists`로 실패하는가 — 윈도우의 `rename`은 파일을 조용히 덮어쓴다
+- `EXDEV`가 복사+삭제로 이어지지 않는가
+- `executeApproved`가 저널에 빈 기록을 **먼저** 저장하고, 저장 실패면 실행하지 않는가
+- 실행·실행취소 뒤에 `markStale()`과 `lastPlan = null`이 불리는가
+- `undoMoves`가 ok 였던 것만 역순으로, `to`가 그대로 있고 `from`이 비었을 때만 옮기는가
+- `undoMoves`의 폴더 치우기가 `entry.createdFolders`에 있는 이름만, `sanitizeFolderName`을 다시 거친 뒤,
+  `lstat`이 진짜 디렉터리(링크 아님)일 때만 `io.rmdir`을 부르고, 실패(ENOTEMPTY 등)는 `keptFolders`로 삼키는가
+
+`topLevel.ts`의 `readdir`/`lstat`은 조회다. 레지스트리도 조회만 해야 한다 — `Set-ItemProperty`,
+`Remove-Item`, `New-Item`이 있으면 보고.
 
 ```bash
 grep -n "Set-ItemProperty\|Remove-Item\|New-Item\|Stop-Process" src/main/services/apps.ts

@@ -7,6 +7,7 @@ import { AppsCard } from '@/components/AppsCard'
 import { DriveCard } from '@/components/DriveCard'
 import { FolderSummaryCard } from '@/components/FolderSummaryCard'
 import { OpportunityCard } from '@/components/OpportunityCard'
+import { RecentRunCard } from '@/components/RecentRunCard'
 import type { ScanState } from '@/hooks/useScan'
 import { formatCount, truncatePath } from '@/lib/format'
 
@@ -28,7 +29,7 @@ export default function Dashboard({
   onOpenPlan
 }: DashboardProps): JSX.Element {
   const [drives, setDrives] = useState<DriveInfo[] | null>(null)
-  const { result, progress, isScanning, error, run } = scan
+  const { result, progress, isScanning, error, run, invalidate } = scan
 
   useEffect(() => {
     let alive = true
@@ -123,6 +124,7 @@ export default function Dashboard({
             onRemoveFolder={(path) => void removeFolder(path)}
           />
           <OpportunityCard opportunities={result?.opportunities ?? null} settings={settings} />
+          <RecentRunCard scanning={isScanning} onFilesMoved={invalidate} />
         </div>
       </main>
     </div>

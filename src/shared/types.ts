@@ -307,17 +307,100 @@ export interface AdvisorPreview {
 
 // ---------------------------------------------------------------- 실행 · 실행취소 (B 단계)
 
+/**
+ * renderer 가 돌려보내는 결정 하나. main 은 이 값을 lastPlan 과 대조한 뒤에만 움직인다.
+ * 그대로 두는 항목은 요청에 넣지 않는다 — 요청에 있는 것만 옮긴다.
+ */
+export interface ExecuteRequest {
+  id: string
+  /** 폴더 이름 (경로 아님). 실제 목적지는 main 이 join(root, toFolder, item.name) 으로 만든다 */
+  toFolder: string
+}
+
+/** 이동 하나가 실패한 이유. 화면 문구는 EXEC_ERROR_LABELS 에서 고른다 */
+export type ExecErrorCode =
+  | 'missing'
+  | 'link'
+  | 'kind-changed'
+  | 'dest-not-dir'
+  | 'exists'
+  | 'exdev'
+  | 'io'
+
+export const EXEC_ERROR_LABELS: Record<ExecErrorCode, string> = {
+  missing: '원본이 없습니다 (스캔 뒤에 지워졌거나 옮겨졌습니다)',
+  link: '원본이 링크·정션입니다',
+  'kind-changed': '파일이 폴더로(또는 폴더가 파일로) 바뀌었습니다',
+  'dest-not-dir': '목적지 폴더 자리에 파일이나 링크가 있습니다',
+  exists: '목적지에 같은 이름이 이미 있습니다 (덮어쓰지 않습니다)',
+  exdev: '다른 드라이브로는 옮기지 않습니다 (복사하지 않습니다)',
+  io: '파일시스템 오류'
+}
+
+/** 이동(또는 되돌리기) 하나의 결과. from → to 는 실제로 시도한 방향이다 */
 export interface ExecutionResult {
   id: string
+  name: string
+  kind: ItemKind
   from: string
   to: string
   ok: boolean
+  code?: ExecErrorCode
+  /** EXEC_ERROR_LABELS[code] 에 원인을 덧붙인 문장. 화면에 그대로 보여준다 */
   error?: string
 }
 
+/** 실행 한 번의 기록. userData/journal.json 에 남고 실행취소가 이걸 읽는다 */
 export interface UndoEntry {
   id: string
   executedAt: number
+  /** 감시 폴더. 모든 from 은 이 바로 아래, 모든 to 는 이 아래 폴더 안이다 */
   root: string
   results: ExecutionResult[]
+  /** 실행하면서 새로 만든 폴더 이름. 실행취소가 이 중 비어 있는 것만 치운다 */
+  createdFolders: string[]
+  /** 실행취소를 한 시각. 있으면 다시 되돌릴 수 없다 */
+  undoneAt?: number
+  /** 되돌린 결과 (to → from). 일부가 실패했으면 어느 것이 제자리로 못 갔는지 여기 남는다 */
+  undoResults?: ExecutionResult[]
+  /** 실행취소가 지운 폴더 (createdFolders 중 비어 있던 것) */
+  removedFolders?: string[]
+  /**
+   * 실행취소가 남긴 폴더 — 비어 있지 않거나 폴더가 아니게 된 것. createdFolders 에서 removedFolders 를
+   * 뺀 값이 아니다: 사용자가 이미 지운 폴더는 어느 쪽에도 없다
+   */
+  keptFolders?: string[]
+}
+
+export interface ExecuteProgress {
+  done: number
+  total: number
+  /** 지금 옮기는 항목 이름. 끝나면 빈 문자열 */
+  current: string
+}
+
+/**
+ * 실행 결과. 'blocked' 는 사전 점검(읽기 전용)에서 하나라도 걸려 **아무것도 옮기지 않은** 것이다 —
+ * 사용자가 걸린 카드를 그대로 두기로 옮기고 다시 실행한다.
+ */
+export type ExecuteOutcome =
+  | { status: 'blocked'; problems: ExecutionResult[] }
+  | {
+      status: 'done'
+      entry: UndoEntry
+      /**
+       * 옮긴 뒤 마지막 기록 저장이 실패했을 때 그 이유. entry 는 정확하지만 저널(userData)은 뒤처져
+       * 실행취소가 마지막 항목을 놓칠 수 있다 — 화면이 이걸 보여준다
+       */
+      journalError?: string
+    }
+
+export interface UndoOutcome {
+  entry: UndoEntry
+  /** ok 였던 이동을 역순으로 되돌린 결과 (to → from) */
+  results: ExecutionResult[]
+  /** 실행이 만든 폴더 중 비어 있어 지운 것 */
+  removedFolders: string[]
+  /** 실행이 만든 폴더 중 남긴 것 (비어 있지 않음) */
+  keptFolders: string[]
 }

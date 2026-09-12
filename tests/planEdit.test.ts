@@ -16,7 +16,8 @@ import {
   moveItems,
   removeFolder,
   renameFolder,
-  summarize
+  summarize,
+  toExecuteRequests
 } from '@/lib/planEdit'
 
 const NOW = new Date('2026-09-11T00:00:00Z').getTime()
@@ -318,5 +319,26 @@ describe('summarize', () => {
       skipped: 2,
       newFolders: 1
     })
+  })
+})
+
+describe('toExecuteRequests', () => {
+  it('폴더가 정해진 항목만 {id, toFolder} 로 보낸다. 경로는 없다', () => {
+    const a = item('a.txt', 1)
+    const b = item('b.txt', 1)
+    const c = item('c.txt', 1)
+    const p = plan([pi(a, '문서'), pi(b, null), pi(c, '기존')], [folder('문서'), folder('기존', { existing: true })])
+    const requests = toExecuteRequests(p)
+    expect(requests).toEqual([
+      { id: a.id, toFolder: '문서' },
+      { id: c.id, toFolder: '기존' }
+    ])
+    for (const r of requests) expect(Object.keys(r).sort()).toEqual(['id', 'toFolder'])
+  })
+
+  it('폴더 목록에 없는 이름을 가리키는 항목은 그대로 두기로 본다 (groupByFolder 와 같은 규칙)', () => {
+    const a = item('a.txt', 1)
+    const p = plan([pi(a, '사라진폴더')], [folder('문서')])
+    expect(toExecuteRequests(p)).toEqual([])
   })
 })

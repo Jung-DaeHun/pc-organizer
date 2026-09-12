@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AdvisorPreview, OrganizePlan } from '@shared/types'
+import type {
+  AdvisorPreview,
+  ExecuteOutcome,
+  ExecuteProgress,
+  ExecuteRequest,
+  OrganizePlan
+} from '@shared/types'
 import { errorMessage } from '@/lib/format'
 import {
   addFolder as addFolderTo,
@@ -10,12 +16,14 @@ import {
   type EditResult
 } from '@/lib/planEdit'
 
-export type PlanBusy = 'build' | 'preview' | 'advise' | null
+export type PlanBusy = 'build' | 'preview' | 'advise' | 'execute' | null
 
 export interface PlanState {
   plan: OrganizePlan | null
   busy: PlanBusy
   error: string | null
+  /** 실행 진행률. busy === 'execute' 일 때만 값이 있다 */
+  progress: ExecuteProgress | null
   /** 사용자가 판에서 무언가 고쳤는지. AI 추천을 받으면 그 수정이 덮이므로 미리 알린다 */
   edited: boolean
   /** 확장자 규칙으로 계획을 세운다 */
@@ -24,6 +32,11 @@ export interface PlanState {
   preview: () => Promise<AdvisorPreview | null>
   /** 실제로 AI 에게 보낸다. preview 를 보고 사용자가 누른 뒤에만 부른다 */
   advise: () => Promise<void>
+  /**
+   * 판의 결정을 실행한다. 확인 다이얼로그에서 사용자가 누른 뒤에만 부른다.
+   * 'done' 이면 파일이 움직였으니 화면의 계획을 비운다. 'blocked' 면 아무것도 안 움직였고 계획은 남는다.
+   */
+  execute: (requests: ExecuteRequest[]) => Promise<ExecuteOutcome | null>
   /** 판 편집. 폴더 조작은 실패하면 화면에 보여줄 문장을 돌려준다 */
   moveItems: (ids: string[], toFolder: string | null) => void
   addFolder: (name: string) => string | null
@@ -44,12 +57,17 @@ export function usePlan(): PlanState {
   const [busy, setBusy] = useState<PlanBusy>(null)
   const [error, setError] = useState<string | null>(null)
   const [edited, setEdited] = useState(false)
+  const [progress, setProgress] = useState<ExecuteProgress | null>(null)
 
   const mounted = useRef(true)
   useEffect(() => {
     mounted.current = true
+    const unsubscribe = window.api.onExecuteProgress((next) => {
+      if (mounted.current) setProgress(next)
+    })
     return () => {
       mounted.current = false
+      unsubscribe()
     }
   }, [])
 
@@ -100,6 +118,24 @@ export function usePlan(): PlanState {
     if (next && mounted.current) commitPlan(next, false)
   }, [guard, commitPlan])
 
+  const execute = useCallback<PlanState['execute']>(
+    async (requests) => {
+      setProgress({ done: 0, total: requests.length, current: '' })
+      const outcome = await guard(
+        'execute',
+        () => window.api.executePlan(requests),
+        '실행하지 못했습니다'
+      )
+      if (mounted.current) {
+        setProgress(null)
+        // 파일이 움직였다. 이 계획은 더 이상 실제와 맞지 않는다
+        if (outcome?.status === 'done') commitPlan(null, false)
+      }
+      return outcome
+    },
+    [guard, commitPlan]
+  )
+
   // ---------------------------------------------------------------- 판 편집
 
   /** 편집 하나. 실패하면 화면에 보여줄 문장, 아무것도 안 바뀌면 edited 도 건드리지 않는다 */
@@ -149,10 +185,12 @@ export function usePlan(): PlanState {
     plan,
     busy,
     error,
+    progress,
     edited,
     build,
     preview,
     advise,
+    execute,
     moveItems,
     addFolder,
     renameFolder,

@@ -24,15 +24,34 @@ npx vitest                               # watch 모드
 
 ## 불변 조건 — 어기면 안 되는 것
 
-### 1. 계획 세우기까지는 조회 전용. 사용자 파일에 쓰는 코드는 한 줄도 없다
+### 1. 사용자 파일을 움직이는 건 `executor.ts`의 `rename`뿐이다. 사용자 파일을 지우는 코드는 한 줄도 없다
 
-스캔·정리 계획·AI 추천은 전부 조회다. 스캔 결과가 정확하다는 확신이 서기 전에 되돌릴 수 없는
-동작을 붙이면, 버그 하나가 곧바로 사용자 파일 손실이 된다. **허용되는 쓰기는 `services/store.ts`가
-`userData` 아래에 두는 `settings.json`·`secrets.json`뿐이다.** 레지스트리도 조회만 한다
-(`Set-ItemProperty` / `Remove-Item` / `New-Item` 금지).
+스캔·정리 계획·AI 추천은 전부 조회다. 사용자 파일에 쓰는 코드는 **`services/executor.ts` 한 곳**이고,
+하는 일은 폴더 만들기(`mkdir`)·옮기기(`rename`)·실행취소가 **자기가 만든 빈 폴더**를 치우기(`rmdir`)
+셋뿐이다. `unlink`·`rm`·`copyFile`·`writeFile`(사용자 경로)·`trashItem`은 어디에도 없다 — 옮긴 것은
+같은 `rename`을 거꾸로 해 되돌린다.
 
-`writeFile`·`unlink`·`rename`·`trashItem` 같은 호출을 `src/main/services/`나 `src/main/ipc/`에
-추가해야 할 것 같으면, 그건 실행 단계(B) 작업이다. 먼저 확인을 받는다.
+`rmdir`은 **비재귀**로만 부른다(`rmdir(path)`, 옵션 없음). 안에 무엇이든 있으면 `ENOTEMPTY`로 실패해
+그대로 두므로 사용자 파일이 지워질 경로가 없다. 대상은 저널의 `createdFolders`(실행이 직접 만든 이름)
+뿐이고, 기존 폴더를 목적지로 썼으면 기록에 없어 건드리지 않는다. `recursive`를 붙이는 순간 이 보장이
+깨진다 — 절대 붙이지 않는다.
+
+- `executor.ts`는 fs 를 import 하지 않는다. `ExecutorIo = { lstat, mkdir, rename, rmdir }`를 주입받고,
+  실체는 **`ipc/handlers.ts`가 `node:fs/promises`로 만드는 객체 하나**다. 가짜 io 로 전부 테스트된다.
+- 실행은 renderer 사본이 아니라 main 의 `lastPlan`과 대조한다(`resolveMoves`). 요청에는 경로가 없고
+  id 와 폴더 이름만 있다. 하나라도 어긋나면 전체 거부.
+- 옮기기 전에 읽기 전용 사전 점검(`preflight`)을 돌려 **하나라도 걸리면 아무것도 옮기지 않는다**
+  (`blocked`). 이름을 바꾸지 않고(`join(root, toFolder, item.name)`), 덮어쓰지 않으며(목적지에 같은
+  이름이 있으면 실패), 복사하지 않고(`EXDEV`면 실패), 정션·링크인 목적지로는 옮기지 않는다.
+- 실행 기록은 `services/journal.ts`가 `userData/journal.json`에 임시 파일 + `rename`으로 원자적으로
+  남긴다. 기록을 남길 수 없으면 실행하지 않는다. 실행·실행취소 뒤에는 `markStale()`로 스캔 목록을
+  버려 다시 스캔하기 전까지 계획을 세울 수 없다.
+
+`userData` 아래 쓰기는 `store.ts`(`settings.json`·`secrets.json`)와 `journal.ts`(`journal.json`)만.
+레지스트리는 조회만 한다(`Set-ItemProperty` / `Remove-Item` / `New-Item` 금지).
+
+`ExecutorIo`에 메서드를 추가하거나 `executor.ts` 밖에서 쓰기 호출을 부르고 싶으면 먼저 확인을 받는다.
+휴지통(`trashItem`)은 B3(중복 후보) 작업이고 아직 없다.
 
 ### 2. 클라우드 전용 파일의 내용을 읽지 않는다
 
@@ -116,9 +135,11 @@ AI 추천은 이 앱에서 네트워크로 나가는 유일한 경로다. 보내
 ```
 src/shared/     main·renderer 공용 계약 (types / channels / api). IPC를 넘는 값은 순수 데이터
 src/main/       파일시스템·레지스트리·네트워크를 만지는 유일한 곳
-  ipc/          채널 등록만. 로직 없음 (API 키로 StructuredCall 을 만들어 주입하는 것까지)
+  ipc/          채널 등록만. 로직 없음 (API 키로 StructuredCall, node:fs 로 ExecutorIo 를 만들어 주입하는 것까지)
   services/     scan(조율) · scanner(순회) · opportunities · summarize · categorize · temp · apps · drives · store
-                plan(조율, lastPlan) · topLevel(루트 한 단계) · planner(규칙) · advisor(AI 요청·검증·병합)
+                plan(조율, lastPlan, executeApproved) · topLevel(루트 한 단계) · planner(규칙) · advisor(AI 요청·검증·병합)
+                executor(이동·되돌리기, io 주입) · journal(실행 기록, userData) · undo(조율)
+                activity(스캔·실행·실행취소 자물쇠 — 한 번에 하나만)
   lib/          powershell · hash · paths · structured(계약) · anthropic(SDK, 유일한 네트워크)
 src/preload/    contextBridge 다리
 src/renderer/   React UI. Node 권한 없음. App 이 view 상태로 Dashboard / PlanPage 를 고른다
@@ -137,16 +158,39 @@ src/renderer/   React UI. Node 권한 없음. App 이 view 상태로 Dashboard /
 원본 `FileEntry[]`는 `scan.ts`의 모듈 변수 `lastEntries`에 **main 쪽에만** 남는다
 (`getLastEntries()`로 꺼낸다). renderer로는 집계 수치만 보낸다 — 파일 수만 개를 IPC로 넘기면
 직렬화 비용만으로 화면이 눈에 띄게 버벅인다. 목록과 `lastScannedAt`은 스캔이 **끝났을 때** 함께
-바뀌고, `runScan`은 재진입을 막는다.
+바뀐다.
+
+**스캔·실행·실행취소는 한 번에 하나만 돈다** — `services/activity.ts`의 자물쇠 하나를 셋이 같이
+잡는다(`beginActivity`, `finally`에서 놓는다). 스캔 도중 파일이 움직이면, 실행취소가 `markStale()`로
+목록을 비워도 스캔이 끝나며 옮기기 전 위치로 잡힌 목록으로 `lastEntries`를 덮어써 그 뒤의 계획이 없는
+파일을 가리킨다. 계획 세우기는 잠그지 않되 `assertIdle`로 아무 작업도 없을 때만 응한다. 세 작업이
+서로의 플래그를 보게 하지 않는다 — 검사가 여섯 곳으로 흩어져 하나만 빠져도 조용히 깨진다.
 
 **정리 계획** — `services/plan.ts`가 조율하고 마지막 계획을 `lastPlan`에 main 쪽에만 둔다.
 `buildPlan(root, scannedAt)`은 renderer가 보고 있는 `ScanResult.scannedAt`과 main의 목록이 같은
 스캔인지 확인한 뒤에만 응한다. 대상은 감시 폴더 **바로 아래**의 파일과 폴더(통째로)뿐이다
 (`topLevel.ts` — 루트 한 단계만 `readdir`, 폴더 용량은 `lastEntries`를 경로 접두로 집계).
 `planner.ts`가 확장자 규칙으로 초안을 만들고 `advisor.ts`가 그 위에 AI 추천을 얹는다.
-`OrganizePlan`은 유한한 목록이라 renderer로 넘기지만, 실행(B)은 renderer가 돌려보낸 `{id, toFolder}`를
-`lastPlan`과 대조한 뒤에만 한다. 클라우드 전용 파일·링크·`desktop.ini`·`.lnk`·`.url`은 계획에서
-뺀다(`skipped`에 이유 코드와 함께).
+`OrganizePlan`은 유한한 목록이라 renderer로 넘기지만, 실행은 renderer가 돌려보낸 `{id, toFolder}`를
+`lastPlan`과 대조한 뒤에만 한다. 클라우드 전용 파일·링크·`desktop.ini`·`.lnk`(앱 바로가기)는 계획에서
+뺀다(`skipped`에 이유 코드와 함께). `.url`(인터넷 바로가기)은 정리 대상이다 — 어디로 옮겨도 그대로 열린다.
+
+**실행** — `plan.ts`의 `executeApproved(requests, {io, journalPath, onProgress})`가 조율한다.
+`executor.ts`의 `resolveMoves`(계획 대조) → `preflight`(읽기 전용 점검, 하나라도 걸리면 `blocked`) →
+저널에 빈 기록 저장 → `executeMoves`(항목마다 `mkdir`+`rename`, 실패해도 계속, 결과마다 저널 갱신).
+끝나면 `lastPlan = null`, `markStale()`. 실행취소는 `undo.ts`가 저널에서 기록을 찾아 `undoMoves`로
+ok 였던 이동을 역순으로 되돌린 뒤 `createdFolders` 중 빈 것을 `rmdir`(비재귀)로 치우고 `undoneAt`을
+찍는다(한 번만). 비어 있지 않은 폴더는 `keptFolders`로 돌려주고 남긴다 — 저널에도 같이 적는다.
+화면은 `createdFolders - removedFolders`로 계산하지 않는다(사용자가 이미 지운 폴더는 어느 쪽도 아니다).
+저널은 디스크의 JSON이라 읽을 때 원소 모양까지 검사하고(`journal.ts` `isEntry`), `undoMoves`는
+기록의 경로가 `root\name → root\폴더\name` 꼴인지 다시 본 뒤에만 `rename`한다.
+
+저널의 `saveEntry`는 **저장하려는 항목을 무조건 남기고** 나머지만 `JOURNAL_LIMIT`에 맞춰 자른다.
+시각으로 정렬한 뒤 자르면 시계가 뒤로 간 뒤에 방금 실행한 기록이 잘려 "기록 없는 실행"이 된다.
+옮긴 뒤 마지막 저장이 실패하면 `ExecuteOutcome.journalError`로 화면에 알린다(저널이 뒤처져 실행취소가
+마지막 항목을 놓칠 수 있다).
+renderer 는 `usePlan.execute` → `ExecuteDialog`(확인 → 진행 → 결과) → `scan.invalidate()` 순서로
+움직이고, 대시보드의 `RecentRunCard`가 저널을 보여주며 실행취소 버튼을 준다.
 
 **계획은 목적지를 폴더 이름으로만 말한다.** `PlanItem.toFolder`는 root 바로 아래 폴더의 이름이고
 경로가 아니다. renderer는 경로를 한 번도 조립하지 않으며, 실제 경로는 실행 단계에서 main이
@@ -219,12 +263,11 @@ git에는 걸리지 않는다.
 정렬이 바뀌어도 '이미지'는 늘 같은 색이어야 한다. 누적 띠의 순서도 데이터가 아니라 고정 카테고리
 순서다. 띠 아래 목록이 범례이자 표 역할을 해, 색만으로 정보를 전달하는 구간이 없어야 한다.
 
-## 다음 단계 — B: 실행 (아직 구현 없음)
+## 다음 단계 — B3: 중복 후보 → 휴지통 (아직 구현 없음)
 
-`src/shared/types.ts`의 `ExecutionResult` / `UndoEntry`는 **승인 → 실행 → 실행취소**를 위해 자리만
-잡아둔 타입이다. 지금 코드는 이 값을 만들지 않는다. 실행기는 `services/executor.ts`에 두고 쓰기
-I/O(`mkdir`/`rename`/`trashItem`)는 `ExecutorIo`로 주입받아 `ipc/handlers.ts`에서만 실체화한다.
-이름을 바꾸지 않고(`join(root, toFolder, item.name)`) 덮어쓰지 않으며(목적지에 같은 이름이 있으면 실패)
-복사하지 않는다(`EXDEV`면 실패). 삭제는 항상 휴지통을 경유하고 규칙(중복 후보)에서만 나오며,
-지우기 전에 전체 해시로 다시 확인한다 — 그때 `hashFull`은 열기 직전에 `lstat`으로 클라우드 전용
-여부를 다시 본다.
+이동·실행취소(B1·B2)는 구현됐다. 남은 것은 중복 후보 정리다. 삭제는 항상 휴지통을 경유하고
+규칙(중복 후보)에서만 나오며, AI 는 관여하지 않는다(`TrashItem`은 `PlanItem`과 다른 타입으로 둔다).
+`ExecutorIo`에 `trashItem`(`shell.trashItem`)을 추가하고, 그룹마다 최소 1개를 남기며, 지우기 전에
+전체 해시로 다시 확인한다 — 그때 `hashFull`은 열기 직전에 `lstat`으로 클라우드 전용 여부를 다시
+본다. `opportunities.ts`의 `findDuplicates`에서 그룹을 보존하는 `groupDuplicates()`를 분리한다.
+실행취소는 안내만("휴지통에서 복원").

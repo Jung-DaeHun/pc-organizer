@@ -1,4 +1,5 @@
 import type {
+  ExecuteRequest,
   OrganizeItem,
   OrganizePlan,
   PlanItem,
@@ -255,4 +256,19 @@ export function summarize(plan: OrganizePlan): PlanSummary {
     // 카드가 하나도 안 가는 새 폴더는 실행해도 만들어지지 않으니 세지 않는다
     newFolders: plan.folders.filter((f) => !f.existing && usedKeys.has(folderKey(f.name))).length
   }
+}
+
+/**
+ * 판의 결정을 main 에 보낼 요청으로 바꾼다. 카드가 있는 열이 곧 결정이라 toFolder 가 있는 항목만
+ * 들어가고, 경로는 없다 — main 이 자기 계획(lastPlan)과 id 로 대조해 경로를 만든다.
+ * 폴더 목록에 없는 이름을 가리키는 항목은 groupByFolder 와 같은 이유로 그대로 두기로 본다.
+ */
+export function toExecuteRequests(plan: OrganizePlan): ExecuteRequest[] {
+  const known = new Set(plan.folders.map((f) => folderKey(f.name)))
+  const requests: ExecuteRequest[] = []
+  for (const p of plan.items) {
+    if (p.toFolder === null || !known.has(folderKey(p.toFolder))) continue
+    requests.push({ id: p.item.id, toFolder: p.toFolder })
+  }
+  return requests
 }

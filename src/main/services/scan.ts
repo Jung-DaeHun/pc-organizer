@@ -1,5 +1,6 @@
 import type { FileEntry, Opportunities, ScanProgress, ScanResult } from '@shared/types'
 import { hashHead } from '../lib/hash'
+import { beginActivity } from './activity'
 import { mergeEntries, scanFolders } from './scanner'
 import {
   findDuplicates,
@@ -24,7 +25,6 @@ import { measureTempAndTrash } from './temp'
  */
 let lastEntries: FileEntry[] = []
 let lastScannedAt = 0
-let scanning = false
 
 export function getLastEntries(): readonly FileEntry[] {
   return lastEntries
@@ -35,18 +35,26 @@ export function getLastScannedAt(): number {
   return lastScannedAt
 }
 
-export function isScanning(): boolean {
-  return scanning
+/**
+ * 파일을 실제로 옮긴 뒤(실행·실행취소) 부른다. 목록이 실제와 달라졌으니 다시 스캔하기 전까지는
+ * 계획을 세우지 못하게 한다 — 낡은 목록으로 세운 계획은 없는 파일을 가리킨다.
+ */
+export function markStale(): void {
+  lastEntries = []
+  lastScannedAt = 0
 }
 
-/** 등록된 폴더를 전부 훑고 대시보드가 필요로 하는 수치를 만든다. */
+/**
+ * 등록된 폴더를 전부 훑고 대시보드가 필요로 하는 수치를 만든다.
+ * 스캔·실행·실행취소는 한 번에 하나만 돈다(activity.ts) — 훑는 도중 파일이 움직이면 옮기기 전 위치로
+ * 잡힌 목록이 남아, 그 뒤의 markStale() 이 무효가 된다.
+ */
 export async function runScan(onProgress?: (progress: ScanProgress) => void): Promise<ScanResult> {
-  if (scanning) throw new Error('스캔이 이미 진행 중입니다')
-  scanning = true
+  const release = beginActivity('scan')
   try {
     return await scanOnce(onProgress)
   } finally {
-    scanning = false
+    release()
   }
 }
 

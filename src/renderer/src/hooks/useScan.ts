@@ -8,6 +8,8 @@ export interface ScanState {
   isScanning: boolean
   error: string | null
   run: () => Promise<void>
+  /** 파일이 움직인 뒤(실행·실행취소) 부른다. 결과를 비워 다시 스캔하기 전까지 계획 버튼을 막는다 */
+  invalidate: () => void
 }
 
 /**
@@ -56,7 +58,12 @@ export function useScan(): ScanState {
     }
   }, [])
 
-  return { result, progress, isScanning, error, run }
+  const invalidate = useCallback(() => {
+    setResult(null)
+    setError(null)
+  }, [])
+
+  return { result, progress, isScanning, error, run, invalidate }
 }
 
 export type { ScanProgress, ScanResult }

@@ -8,3 +8,6 @@ release/
 
 # 개인 설정은 공유하지 않는다 (.claude/settings.json 은 팀 공유용이라 커밋한다)
 .claude/settings.local.json
+
+# 진행 메모는 로컬에만 둔다
+PROGRESS.md

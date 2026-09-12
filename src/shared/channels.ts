@@ -29,6 +29,16 @@ export const CH = {
   planAdvisePreview: 'plan:advise-preview',
   planAdvise: 'plan:advise',
 
+  /**
+   * 실행 (B 단계) — 이 앱에서 사용자 파일을 움직이는 유일한 채널. 저널에 남기고 실행취소로 되돌린다.
+   * execute 는 invoke, progress 는 main -> renderer
+   */
+  planExecute: 'plan:execute',
+  planExecuteProgress: 'plan:execute-progress',
+  /** 실행 기록 조회와 되돌리기 */
+  undoList: 'undo:list',
+  undoRun: 'undo:run',
+
   /** API 키. 키 값이 renderer 로 돌아오는 채널은 없다 */
   secretsSetApiKey: 'secrets:set-api-key',
   secretsHasApiKey: 'secrets:has-api-key',

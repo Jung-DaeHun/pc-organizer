@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useState, type JSX } from 'react'
-import { ArrowLeft, ListChecks, Loader2, Sparkles } from 'lucide-react'
-import type { AdvisorPreview, Settings } from '@shared/types'
+import { ArrowLeft, ListChecks, Loader2, Play, Sparkles } from 'lucide-react'
+import type { AdvisorPreview, Settings, UndoEntry } from '@shared/types'
 import { CardFieldsMenu } from '@/components/plan/CardFieldsMenu'
+import { ExecuteDialog, type ExecuteState } from '@/components/plan/ExecuteDialog'
 import { KanbanBoard } from '@/components/plan/KanbanBoard'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
@@ -9,8 +10,9 @@ import { Select } from '@/components/ui/select'
 import { useCardFields } from '@/hooks/useCardFields'
 import { usePlan } from '@/hooks/usePlan'
 import type { ScanState } from '@/hooks/useScan'
+import { useUndo } from '@/hooks/useUndo'
 import { formatBytes, formatCount, formatDate, truncatePath } from '@/lib/format'
-import { summarize } from '@/lib/planEdit'
+import { summarize, toExecuteRequests } from '@/lib/planEdit'
 
 interface PlanPageProps {
   scan: ScanState
@@ -21,7 +23,8 @@ interface PlanPageProps {
 
 /**
  * 정리 계획 화면. 폴더 = 열, 항목 = 카드인 칸반 판이다.
- * 여기서는 계획을 세우고 고치기만 한다 — 파일은 움직이지 않는다.
+ * 판에서는 계획을 세우고 고치기만 한다. 파일이 움직이는 건 푸터의 '실행' → 확인 다이얼로그에서
+ * 사용자가 한 번 더 누른 뒤이고, 그 뒤에는 스캔 결과가 낡아 다시 스캔해야 한다.
  */
 export default function PlanPage({ scan, settings, hasApiKey, onBack }: PlanPageProps): JSX.Element {
   const roots = useMemo(() => settings?.watchedFolders ?? [], [settings])
@@ -33,10 +36,12 @@ export default function PlanPage({ scan, settings, hasApiKey, onBack }: PlanPage
     plan,
     busy,
     error,
+    progress,
     edited,
     build,
     preview,
     advise,
+    execute,
     moveItems,
     addFolder,
     renameFolder,
@@ -46,6 +51,8 @@ export default function PlanPage({ scan, settings, hasApiKey, onBack }: PlanPage
   } = usePlan()
   const [fields, setField] = useCardFields()
   const [consent, setConsent] = useState<AdvisorPreview | null>(null)
+  const [exec, setExec] = useState<ExecuteState | null>(null)
+  const undoState = useUndo()
 
   const scannedAt = scan.result?.scannedAt ?? 0
   const canBuild = Boolean(root) && scannedAt > 0 && !scan.isScanning && busy === null
@@ -75,6 +82,47 @@ export default function PlanPage({ scan, settings, hasApiKey, onBack }: PlanPage
 
   const stats = useMemo(() => (plan ? summarize(plan) : null), [plan])
 
+  // ---------------------------------------------------------------- 실행
+
+  const openExecute = useCallback(() => {
+    if (plan) setExec({ phase: 'confirm', plan })
+  }, [plan])
+
+  const confirmExecute = useCallback(async () => {
+    if (!plan) return
+    setExec({ phase: 'running' })
+    const outcome = await execute(toExecuteRequests(plan))
+    if (!outcome) {
+      // 호출 자체가 실패했다 (usePlan 의 error 에 문장이 있다). 아무것도 안 움직였으니 확인 화면으로
+      setExec({ phase: 'confirm', plan })
+      return
+    }
+    if (outcome.status === 'blocked') {
+      setExec({ phase: 'blocked', problems: outcome.problems })
+      return
+    }
+    // 파일이 움직였다. 대시보드의 스캔 결과도 더는 맞지 않는다
+    scan.invalidate()
+    setExec({ phase: 'done', entry: outcome.entry, journalError: outcome.journalError })
+  }, [plan, execute, scan])
+
+  const undoFromDialog = useCallback(
+    async (entry: UndoEntry) => {
+      // 기록 저장 실패 경고는 되돌리기가 실패해 결과 화면으로 돌아와도 그대로 보여야 한다
+      const journalError = exec?.phase === 'done' ? exec.journalError : undefined
+      setExec({ phase: 'undoing', entry, journalError })
+      const outcome = await undoState.undo(entry.id)
+      setExec(outcome ? { phase: 'undone', outcome } : { phase: 'done', entry, journalError })
+    },
+    [undoState, exec]
+  )
+
+  const rescan = useCallback(() => {
+    setExec(null)
+    onBack()
+    void scan.run()
+  }, [onBack, scan])
+
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center gap-3 border-b px-6 py-4">
@@ -84,7 +132,7 @@ export default function PlanPage({ scan, settings, hasApiKey, onBack }: PlanPage
         <div className="min-w-0 flex-1">
           <h1 className="text-base font-semibold">정리 계획</h1>
           <p className="text-muted-foreground truncate text-xs">
-            카드를 폴더 열로 끌어 정리합니다. 이 화면에서는 파일이 움직이지 않습니다.
+            카드를 폴더 열로 끌어 정리합니다. 아래 &lsquo;실행&rsquo;을 누르고 확인하기 전까지 파일은 움직이지 않습니다.
           </p>
         </div>
 
@@ -181,14 +229,29 @@ export default function PlanPage({ scan, settings, hasApiKey, onBack }: PlanPage
             )}
 
             <footer className="flex items-center justify-end gap-2 border-t pt-3">
-              {/* 실행 단계에서 열리는 자리. 지금은 파일을 옮기는 채널 자체가 없다 */}
-              <Button disabled title="다음 단계에서 열립니다">
+              {/* 여기서는 확인 다이얼로그만 연다. 실제 이동은 다이얼로그에서 한 번 더 누른 뒤 */}
+              <Button
+                onClick={openExecute}
+                disabled={stats.moving === 0 || busy !== null}
+                title={stats.moving === 0 ? '옮길 카드가 없습니다' : undefined}
+              >
+                <Play />
                 {formatCount(stats.moving)}개 실행
               </Button>
             </footer>
           </>
         )}
       </main>
+
+      <ExecuteDialog
+        state={exec}
+        progress={progress}
+        error={exec?.phase === 'confirm' ? error : undoState.error}
+        onConfirm={() => void confirmExecute()}
+        onClose={() => setExec(null)}
+        onUndo={(entry) => void undoFromDialog(entry)}
+        onRescan={rescan}
+      />
 
       <Dialog
         open={consent !== null}

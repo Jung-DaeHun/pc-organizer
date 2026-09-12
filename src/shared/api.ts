@@ -2,10 +2,15 @@ import type {
   AdvisorPreview,
   AppsInfo,
   DriveInfo,
+  ExecuteOutcome,
+  ExecuteProgress,
+  ExecuteRequest,
   OrganizePlan,
   ScanProgress,
   ScanResult,
-  Settings
+  Settings,
+  UndoEntry,
+  UndoOutcome
 } from './types'
 
 /**
@@ -14,7 +19,8 @@ import type {
  * 이 인터페이스를 preload(구현)와 renderer(사용) 양쪽이 함께 참조하므로,
  * 한쪽만 바뀌면 타입 검사에서 걸린다.
  *
- * 계획 세우기까지는 조회 전용이다. 파일을 옮기거나 지우는 채널은 아직 하나도 없다.
+ * 계획 세우기까지는 조회 전용이다. 파일을 움직이는 채널은 executePlan 과 runUndo 둘뿐이고,
+ * 둘 다 rename 만 한다 — 지우는 채널은 없다.
  */
 export interface RendererApi {
   /** main 프로세스가 살아있는지 확인하는 왕복 */
@@ -55,6 +61,22 @@ export interface RendererApi {
    * 사용자가 previewAdvice 내용을 보고 누른 뒤에만 부른다.
    */
   advisePlan(): Promise<OrganizePlan>
+
+  /**
+   * 판에서 승인한 이동을 실행한다. **사용자 파일을 움직이는 유일한 호출.**
+   * main 은 요청을 자기 계획(lastPlan)과 대조하고, 사전 점검에서 하나라도 걸리면 아무것도 옮기지 않는다.
+   * 실행 뒤에는 스캔 결과가 낡으므로 다시 스캔해야 계획을 세울 수 있다.
+   */
+  executePlan(requests: ExecuteRequest[]): Promise<ExecuteOutcome>
+
+  /** 실행 진행률 구독. 반환된 함수를 부르면 구독이 끊긴다 */
+  onExecuteProgress(callback: (progress: ExecuteProgress) => void): () => void
+
+  /** 실행 기록. 최근 것이 앞 */
+  listUndo(): Promise<UndoEntry[]>
+
+  /** 실행 기록 하나를 되돌린다 (ok 였던 이동을 역순으로 to → from). 한 기록은 한 번만 */
+  runUndo(id: string): Promise<UndoOutcome>
 
   /**
    * Anthropic API 키. 저장은 main 이 암호화해서 하고, 돌려받는 건 '있다/없다' 뿐이다.

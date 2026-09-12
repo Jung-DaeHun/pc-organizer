@@ -101,7 +101,8 @@ describe('listTopLevel', () => {
       ])
     )
 
-    expect(listing.items.map((i) => i.name)).toEqual(['ok.jpg'])
+    // 인터넷 바로가기(.url)는 정리 대상이다. 앱 바로가기(.lnk)만 뺀다
+    expect(listing.items.map((i) => i.name)).toEqual(['ok.jpg', 'site.url'])
 
     const reason = Object.fromEntries(listing.skipped.map((s) => [s.name, s.reason]))
     expect(reason).toEqual({
@@ -109,7 +110,6 @@ describe('listTopLevel', () => {
       'cloud.mp4': 'cloud-only',
       'desktop.ini': 'system',
       'game.lnk': 'shortcut',
-      'site.url': 'shortcut',
       weird: 'not-file-or-dir'
     })
     // 화면 문구도 같이 실려 간다

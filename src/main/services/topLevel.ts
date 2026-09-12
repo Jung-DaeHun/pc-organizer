@@ -21,8 +21,11 @@ import { categorize, extensionOf } from './categorize'
 /** 정리 대상에서 항상 빼는 이름. 탐색기가 관리하는 파일이라 옮기면 폴더 표시가 깨진다 */
 const SYSTEM_NAMES = new Set(['desktop.ini', 'thumbs.db'])
 
-/** 바로가기는 그 자리에 있으라고 둔 것이다. 옮기면 의미가 없다 */
-const SHORTCUT_EXTS = new Set(['.lnk', '.url'])
+/**
+ * 앱 바로가기(.lnk)는 그 자리에 있으라고 둔 것이다. 옮기면 의미가 없다.
+ * 인터넷 바로가기(.url)는 뺀다 — 바탕화면에 쌓이는 정리 대상이고, 어디로 옮겨도 그대로 열린다.
+ */
+const SHORTCUT_EXTS = new Set(['.lnk'])
 
 export interface TopLevelDirent {
   name: string

@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { CH } from '@shared/channels'
 import type { RendererApi } from '@shared/api'
-import type { ScanProgress, Settings } from '@shared/types'
+import type { ExecuteProgress, ExecuteRequest, ScanProgress, Settings } from '@shared/types'
 
 /**
  * sandbox: true 인 preload에서는 Node 모듈을 쓸 수 없다.
@@ -36,6 +36,18 @@ const api: RendererApi = {
     ipcRenderer.invoke(CH.planBuild, root, scannedAt),
   previewAdvice: () => ipcRenderer.invoke(CH.planAdvisePreview),
   advisePlan: () => ipcRenderer.invoke(CH.planAdvise),
+
+  executePlan: (requests: ExecuteRequest[]) => ipcRenderer.invoke(CH.planExecute, requests),
+  onExecuteProgress: (callback) => {
+    const listener = (_event: IpcRendererEvent, progress: ExecuteProgress): void =>
+      callback(progress)
+    ipcRenderer.on(CH.planExecuteProgress, listener)
+    return () => {
+      ipcRenderer.off(CH.planExecuteProgress, listener)
+    }
+  },
+  listUndo: () => ipcRenderer.invoke(CH.undoList),
+  runUndo: (id: string) => ipcRenderer.invoke(CH.undoRun, id),
 
   setApiKey: (key: string) => ipcRenderer.invoke(CH.secretsSetApiKey, key),
   hasApiKey: () => ipcRenderer.invoke(CH.secretsHasApiKey),
