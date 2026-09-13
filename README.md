@@ -56,6 +56,8 @@ npm run package    # 설치 파일 생성 (release/pc-organizer-setup-<버전>.e
 설치 파일은 NSIS(설치 폴더 선택 가능, 현재 사용자 전용, 관리자 권한 없음)다. 설치본과 `npm run dev` 는 같은
 `%APPDATA%\pc-organizer` 를 쓴다(설정·API 키·저널이 공유된다).
 
+배포(GitHub Release 에 설치 파일 첨부)와 받는 쪽이 겪는 SmartScreen 경고, 올리기 전 미결 사항은 `docs/release.md` 에 있다.
+
 ### 아이콘
 
 `build/icon.ico`(16–256px, PNG 항목)와 `build/icon.png`(256px)는 `build/icon.svg` 에서 만든다 — 파랑→남색 둥근
