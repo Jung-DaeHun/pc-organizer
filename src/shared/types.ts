@@ -485,7 +485,7 @@ export const TRASH_ERROR_LABELS: Record<TrashErrorCode, string> = {
   'hash-mismatch': '전체 내용을 비교하니 다른 파일입니다',
   'keeper-missing': '남기기로 한 파일이 사라졌거나 바뀌어 나머지를 보내지 않았습니다',
   'exceeds-recycle-bin':
-    '이 드라이브의 휴지통 최대 크기보다 큰 파일입니다 (윈도우가 휴지통을 거치지 않고 영구 삭제하므로 보내지 않습니다)',
+    '이 드라이브의 휴지통 최대 크기 이상인 파일입니다 (윈도우가 휴지통을 거치지 않고 영구 삭제하므로 보내지 않습니다)',
   'recycle-bin-off':
     '이 드라이브는 휴지통을 쓰지 않도록 설정돼 있습니다 (삭제가 곧 영구 삭제라 보내지 않습니다)',
   'recycle-bin-unknown': '이 드라이브의 휴지통 설정을 확인할 수 없습니다 (영구 삭제일 수 있어 보내지 않습니다)',
