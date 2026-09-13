@@ -105,7 +105,7 @@ export function RecentRunCard({ scanning, onFilesMoved }: RecentRunCardProps): J
                   <li key={entry.id} className="flex items-center gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-baseline gap-2">
-                        <span className="font-medium">{formatDate(entry.executedAt)}</span>
+                        <span className="shrink-0 font-medium whitespace-nowrap">{formatDate(entry.executedAt)}</span>
                         <span className="text-muted-foreground flex items-center gap-1">
                           <Trash2 className="size-3" />
                           중복 후보 정리
@@ -124,7 +124,7 @@ export function RecentRunCard({ scanning, onFilesMoved }: RecentRunCardProps): J
                 <li key={entry.id} className="flex items-center gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline gap-2">
-                      <span className="font-medium">{formatDate(entry.executedAt)}</span>
+                      <span className="shrink-0 font-medium whitespace-nowrap">{formatDate(entry.executedAt)}</span>
                       <span className="text-muted-foreground selectable truncate" title={entry.root}>
                         {truncatePath(entry.root, 36)}
                       </span>

@@ -110,15 +110,23 @@ export interface OpportunitySample {
   mtimeMs: number
 }
 
+/** 대용량·오래된 파일을 가르는 기준 (Settings 의 같은 두 필드) */
+export type Thresholds = Pick<Settings, 'largeFileBytes' | 'oldFileDays'>
+
 export interface Opportunities {
   /** 크기 + 앞부분 해시가 같은 '후보'. 확정 중복이 아님에 유의 */
   duplicates: OpportunityGroup
-  /** 100MB 이상 */
+  /** thresholds.largeFileBytes 이상 */
   large: OpportunityGroup
-  /** 180일 넘게 손대지 않은 파일 */
+  /** thresholds.oldFileDays 넘게 손대지 않은 파일 */
   old: OpportunityGroup
   /** %TEMP% + 휴지통. 스캔 폴더와 무관하게 별도 계산 */
   temp: OpportunityGroup
+  /**
+   * large · old 를 셀 때 쓴 기준. 카드의 힌트 문구는 현재 Settings 가 아니라 이 값을 보여준다 —
+   * 스캔 뒤 설정 화면에서 기준을 바꿔도 수치와 문구가 같은 기준으로 묶인다(다음 스캔부터 새 기준).
+   */
+  thresholds: Thresholds
 
   /**
    * 판단 없이 바로 비울 수 있는 용량 (중복 후보 + 임시파일·휴지통).
@@ -160,7 +168,39 @@ export interface AppsInfo {
   startup: StartupItem[]
 }
 
+// ---------------------------------------------------------------- 분류 규칙
+
+/** 규칙으로 옮길 수 있는 카테고리. '기타'는 확장자만으로 아무것도 알 수 없어 규칙이 없다 */
+export type RuleCategory = Exclude<FileCategory, 'other'>
+
+export const RULE_CATEGORIES: readonly RuleCategory[] = FILE_CATEGORIES.filter(
+  (c): c is RuleCategory => c !== 'other'
+)
+
+/**
+ * 카테고리 하나의 분류 규칙. 사용자가 설정 화면에서 고친다.
+ *
+ * 카테고리 자체는 일곱 개로 고정이다 — 차트 색·집계가 카테고리에 묶여 있다. 사용자가 바꾸는 건
+ * 셋뿐이다: 어떤 확장자를 이 카테고리로 볼지(스캔 집계와 계획이 함께 따른다), 어느 폴더로 보낼지,
+ * 옮길지 말지. 기본값과 정규화는 `shared/rules.ts` 에 있다.
+ */
+export interface CategoryRule {
+  category: RuleCategory
+  /**
+   * 정리 계획이 만드는 폴더 **이름**(경로 아님, sanitizeFolderName 을 통과한 값). 기본값은 CATEGORY_LABELS.
+   * 두 카테고리가 같은 이름을 써도 된다 — 한 폴더로 모은다
+   */
+  folderName: string
+  /** 소문자, 점 없음 ('pdf'). 한 확장자는 한 카테고리에만 있다 */
+  extensions: string[]
+  /** false 면 이 카테고리의 파일은 규칙으로 옮기지 않는다 ('기타'처럼 그대로 둔다). 집계에는 그대로 잡힌다 */
+  enabled: boolean
+}
+
 // ---------------------------------------------------------------- 설정
+
+export const THEMES = ['dark', 'light'] as const
+export type Theme = (typeof THEMES)[number]
 
 export interface Settings {
   /** 스캔 대상으로 등록한 폴더 */
@@ -171,6 +211,10 @@ export interface Settings {
   largeFileBytes: number
   /** 이 일수 넘게 안 쓰면 '오래된 파일' */
   oldFileDays: number
+  /** 카테고리마다 하나, RULE_CATEGORIES 순서. 항상 일곱 개 (store.ts 가 정규화한다) */
+  rules: CategoryRule[]
+  /** 화면 테마. 기본은 dark — index.html 의 첫 페인트와 같다 */
+  theme: Theme
 }
 
 // ---------------------------------------------------------------- 정리 계획 (2단계)

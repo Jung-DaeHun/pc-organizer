@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ExecuteRequest, FileEntry, OrganizePlan } from '@shared/types'
+import { defaultRules } from '@shared/rules'
 
 /**
  * 조율 층(plan.executeApproved · undo.undoExecution · activity)의 테스트.
@@ -20,7 +21,8 @@ const { settings, scanState } = vi.hoisted(() => ({
 }))
 
 vi.mock('../src/main/services/store', () => ({
-  getSettings: async () => settings
+  // 분류 규칙은 기본값 — a.pdf 는 '문서', b.zip 은 '압축' 으로 가야 아래 시나리오가 성립한다
+  getSettings: async () => ({ ...settings, rules: defaultRules(), theme: 'dark' as const })
 }))
 
 vi.mock('../src/main/services/scan', () => ({

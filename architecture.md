@@ -7,24 +7,26 @@
 ## 층 구조
 
 ```
-src/shared/     main·renderer 공용 계약 (types / channels / api / folderName / format). IPC를 넘는 값은 순수 데이터
+src/shared/     main·renderer 공용 계약 (types / channels / api / folderName / format / rules). IPC를 넘는 값은 순수 데이터
+                rules — 분류 규칙의 기본표(확장자 → 카테고리)와 정규화. store 의 검증과 설정 화면이 같은 표를 쓴다
 src/main/       파일시스템·레지스트리·네트워크를 만지는 유일한 곳
-  index.ts      창 생성, will-navigate 차단
+  index.ts      창 생성(저장된 테마로 배경색·nativeTheme), will-navigate 차단
   ipc/          채널 등록만. 로직 없음 (API 키로 StructuredCall, node:fs + shell.trashItem 으로 ExecutorIo,
                 lib/recycleBin 으로 RecycleBinLookup 을 만들어 주입하는 것까지)
   services/     scan(조율, lastEntries·lastDuplicateGroups) · scanner(순회) · opportunities(집계, groupDuplicates) ·
-                summarize · categorize · temp · apps · drives · store
-                plan(조율, lastPlan, executeApproved) · topLevel(루트 한 단계) · planner(규칙) · advisor(AI 요청·검증·병합)
+                summarize · categorize(규칙 → 조회 함수, createCategorizer) · temp · apps · drives · store(settings.json 정규화)
+                plan(조율, lastPlan, executeApproved) · topLevel(루트 한 단계) · planner(분류 규칙) · advisor(AI 요청·검증·병합)
                 dedupe(조율, lastTrashPlan, executeTrashApproved — 중복 후보 → 휴지통)
                 executor(이동·되돌리기·휴지통, io 주입 — 사용자 파일에 쓰는 유일한 곳) · journal(실행 기록, userData) · undo(조율)
                 activity(스캔·실행·실행취소·휴지통 자물쇠 — 한 번에 하나만)
   lib/          powershell · hash(hashHead 앞 4KB · hashFull 전체) · cloudOnly · paths · recycleBin(휴지통 한도·사용량 조회)
                 structured(계약) · anthropic(SDK, 유일한 네트워크)
 src/preload/    contextBridge 다리. 채널마다 감싼 함수 하나
-src/renderer/   React UI. Node 권한 없음. App 이 view 상태로 Dashboard / PlanPage / TrashPage 를 고른다
+src/renderer/   React UI. Node 권한 없음. App 이 view 상태로 Dashboard / PlanPage / TrashPage / SettingsPage 를 고른다
   hooks/        useScan · usePlan · useUndo · useTrash — IPC 호출과 화면 상태
-  lib/          planEdit · trashEdit — 판 편집 규칙(순수 함수, tests/ 가 검증) · format
-  components/   plan/(칸반·ExecuteDialog) · trash/(그룹 카드·TrashDialog) · ui/ · 대시보드 카드들
+  lib/          planEdit · trashEdit · settingsEdit — 판·설정 편집 규칙(순수 함수, tests/ 가 검증) · format · theme
+  components/   plan/(칸반·ExecuteDialog) · trash/(그룹 카드·TrashDialog) · settings/(테마·분류 규칙·판정 기준 카드) ·
+                ui/ · 대시보드 카드들
 tests/          Vitest, node 환경. 서비스는 가짜 io 로, 일부는 임시 디렉터리의 실제 fs 로 돈다
 ```
 
@@ -63,8 +65,9 @@ main 이 renderer 로 미는 진행 이벤트(`scan:progress`, `plan:execute-pro
 `services/plan.ts`가 조율하고 마지막 계획을 `lastPlan`에 main 쪽에만 둔다. `buildPlan(root, scannedAt)`은
 renderer가 보고 있는 `ScanResult.scannedAt`과 main의 목록이 같은 스캔인지 확인한 뒤에만 응한다. 대상은 감시
 폴더 **바로 아래**의 파일과 폴더(통째로)뿐이다(`topLevel.ts` — 루트 한 단계만 `readdir`, 폴더 용량은
-`lastEntries`를 경로 접두로 집계). `planner.ts`가 확장자 규칙으로 초안을 만들고 `advisor.ts`가 그 위에 AI 추천을
-얹는다. `OrganizePlan`은 유한한 목록이라 renderer로 넘기지만, 실행은 renderer가 돌려보낸 `{id, toFolder}`를
+`lastEntries`를 경로 접두로 집계). `planner.ts`가 분류 규칙(`Settings.rules`)으로 초안을 만들고 `advisor.ts`가 그 위에
+AI 추천을 얹는다. 루트 바로 아래 파일은 `listTopLevel`이 **지금 규칙**으로 다시 분류하므로, 스캔 뒤에 규칙을 고쳐도
+계획은 새 규칙을 따른다(집계 카드는 다시 스캔해야 맞는다). `OrganizePlan`은 유한한 목록이라 renderer로 넘기지만, 실행은 renderer가 돌려보낸 `{id, toFolder}`를
 `lastPlan`과 대조한 뒤에만 한다. 클라우드 전용 파일·링크·`desktop.ini`는 계획에서 뺀다(`skipped`에 이유 코드와
 함께). 바로가기(`.lnk`·`.url`)는 정리 대상이다 — 어디로 옮겨도 그대로 열린다.
 
@@ -118,6 +121,34 @@ renderer 는 `useTrash` → `TrashPage`(그룹 카드마다 남길 파일 라디
 `renderer/src/lib/trashEdit.ts`의 순수 함수 — `toTrashRequests`가 포함된 그룹만 `{groupId, keepId}`로 바꾼다)
 → `TrashDialog`(확인 → 진행: 전체 해시 비교 / 보내는 중 → 결과 또는 blocked) → `scan.invalidate()` 순서다.
 대시보드 `OpportunityCard`의 '중복 후보' 행 버튼이 이 화면으로 들어온다.
+
+## 설정 화면 — 분류 규칙과 테마
+
+대시보드 헤더의 톱니 버튼이 `SettingsPage`를 연다. 카드는 셋 — 화면 테마 · 분류 규칙 · 판정 기준(대용량·오래된 파일
+기준). 새 IPC 채널은 없다: 전부 `Settings`의 필드이고 감시 폴더와 같은 `updateSettings` 하나로 간다. 저장이
+돌아오면 `App`의 `settings`를 갈아 끼워 테마가 따라간다. 파일은 건드리지 않는다.
+
+**판정 기준(`largeFileBytes` · `oldFileDays`)** 은 다음 스캔부터 쓰인다. 스캔은 수치를 낸 기준을
+`Opportunities.thresholds`에 같이 실어 보내고, 대시보드 `OpportunityCard`의 힌트 문구("100 MB 이상")는 현재
+`settings`가 아니라 그 값을 보여준다 — 스캔 뒤 기준을 바꿔도 낡은 수치 옆에 새 기준이 붙어 숫자가 문구를
+배신하는 일이 없다.
+
+**분류 규칙(`Settings.rules`)** 은 카테고리(일곱 개, '기타' 제외)마다 `{ folderName, extensions, enabled }` 하나다.
+카테고리 자체는 고정이다 — 차트 색·집계가 카테고리에 묶여 있어 새 카테고리를 만들 수 없다. 기본표와 정규화
+(`normalizeRules` — 항상 일곱 개 순서대로, 한 확장자는 한 카테고리에만, 폴더 이름은 `sanitizeFolderName`)는
+`shared/rules.ts`에 있어 `store.ts`의 검증과 설정 화면의 '기본값으로'가 같은 값을 쓴다. `categorize.ts`의
+`createCategorizer(rules)`가 조회 함수를 만들고, 스캔(`scan.ts` → `scanner.ts`)과 계획(`plan.ts` → `topLevel.ts`)이
+같은 규칙으로 만든 함수를 주입받는다 — 집계의 '이미지'가 계획의 '이미지'다. `planner.ts`는 `enabled`가 꺼진
+카테고리를 '기타'처럼 그대로 두고, 두 카테고리가 같은 폴더 이름을 쓰면 폴더 하나로 모은다(대소문자만 다르면
+앞선 카테고리의 표기). 초안은 renderer 의 사본이고 편집 규칙은 `lib/settingsEdit.ts`의 순수 함수다 —
+다른 카테고리에 있던 확장자를 넣으면 거기서 빼 온다. '저장'을 누르기 전에는 아무것도 바뀌지 않는다.
+
+**테마(`Settings.theme`)** 는 `'dark' | 'light'`, 기본 `dark`. `<html>`의 `.dark` 클래스 하나로 갈린다
+(`index.css`의 변수 두 벌, `@custom-variant dark`). `App`이 `settings.theme`을 보고 `lib/theme.ts`의 `applyTheme`으로
+클래스를 맞추고, 같은 값을 `localStorage`에 사본으로 남긴다 — 다음 실행의 **첫 페인트**를 저장된 테마로 시작하기
+위한 힌트일 뿐 진짜 값은 `settings.json`이다(`main.tsx`가 렌더 전에 `applyCachedTheme`). main 은 창을 만들기 전에
+설정을 읽어 창 배경색과 `nativeTheme.themeSource`(스크롤바·select 목록)를 맞추고, `settings:update` 핸들러가
+바뀔 때마다 따라간다.
 
 ## 저널
 

@@ -11,6 +11,7 @@ import { pathKey } from '../lib/paths'
 import type { StructuredCall } from '../lib/structured'
 import { assertIdle, beginActivity } from './activity'
 import { advisePlan, previewAdvice } from './advisor'
+import { createCategorizer } from './categorize'
 import { executeMoves, preflight, resolveMoves, type ExecutorIo } from './executor'
 import { saveEntry } from './journal'
 import { buildRulePlan } from './planner'
@@ -71,9 +72,16 @@ export async function buildPlan(root: string, scannedAt: number): Promise<Organi
 
   const settings = await getSettings()
   const listing = await listTopLevel(root, entries, readTopLevelFs, {
-    excludedDirNames: settings.excludedDirNames
+    excludedDirNames: settings.excludedDirNames,
+    // 규칙을 스캔 뒤에 고쳤으면 lastEntries 의 카테고리는 옛 규칙이다. 루트 바로 아래 파일은 여기서
+    // 다시 분류하므로 계획은 지금 규칙을 따른다 (집계 카드는 다시 스캔해야 맞는다)
+    categorize: createCategorizer(settings.rules)
   })
-  const plan = buildRulePlan(root, listing, { id: randomUUID(), now: Date.now() })
+  const plan = buildRulePlan(root, listing, {
+    id: randomUUID(),
+    now: Date.now(),
+    rules: settings.rules
+  })
 
   lastPlan = plan
   return plan

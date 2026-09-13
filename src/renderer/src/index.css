@@ -3,7 +3,13 @@
 /* shadcn/ui 규약: .dark 를 조상에 두면 dark: 변형이 켜진다 */
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * 테마는 <html> 의 .dark 클래스 하나로 갈린다. 기본은 dark (index.html 이 그렇게 시작한다).
+ * 사용자가 설정에서 고른 값은 settings.json 에 있고 renderer/src/lib/theme.ts 가 클래스를 켜고 끈다.
+ * color-scheme 은 스크롤바·select 목록 같은 네이티브 컨트롤이 같은 테마를 따르게 한다.
+ */
 :root {
+  color-scheme: light;
   --radius: 0.625rem;
 
   --background: oklch(1 0 0);
@@ -45,6 +51,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   --background: oklch(0.129 0.042 264.695);
   --foreground: oklch(0.984 0.003 247.858);
   --card: oklch(0.208 0.042 265.755);
@@ -101,6 +108,15 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+}
+
+@theme {
+  /*
+   * 대시보드가 3열이 되는 폭. 기본 창(1280px)의 뷰포트는 창 테두리를 뺀 1264px 라 Tailwind 의 xl(1280px)로는
+   * 기본 크기에서 3열이 켜지지 않는다. 1200px 아래(열 하나 370px 미만)에서는 감시 폴더 경로가 잘려 2열이 낫다.
+   * 다른 기본 브레이크포인트처럼 rem 으로 적어야 변형 정렬이 깨지지 않는다 (75rem = 1200px)
+   */
+  --breakpoint-wide: 75rem;
 }
 
 @layer base {

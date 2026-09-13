@@ -1,6 +1,6 @@
 import type { JSX } from 'react'
 import { Copy, Clock, Sparkles, Trash2, Weight } from 'lucide-react'
-import type { Opportunities, OpportunityGroup, Settings } from '@shared/types'
+import type { Opportunities, OpportunityGroup } from '@shared/types'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -8,8 +8,6 @@ import { formatBytes, formatCount, truncatePath } from '@/lib/format'
 
 interface OpportunityCardProps {
   opportunities: Opportunities | null
-  /** 대용량·오래된 파일의 기준값. 힌트 문구가 실제 판정 기준과 어긋나지 않게 */
-  settings: Settings | null
   /** 중복 후보 정리 화면을 연다. null 이면 열 수 없는 상태(스캔 전·스캔 중) */
   onOpenTrash: (() => void) | null
 }
@@ -26,14 +24,7 @@ interface Row {
   open: (() => void) | null
 }
 
-export function OpportunityCard({
-  opportunities,
-  settings,
-  onOpenTrash
-}: OpportunityCardProps): JSX.Element {
-  const largeHint = settings ? `${formatBytes(settings.largeFileBytes, 0)} 이상` : '기준 크기 이상'
-  const oldHint = settings ? `${settings.oldFileDays}일 넘게 손대지 않음` : '오래 손대지 않음'
-
+export function OpportunityCard({ opportunities, onOpenTrash }: OpportunityCardProps): JSX.Element {
   const rows: Row[] = opportunities
     ? [
         {
@@ -60,7 +51,8 @@ export function OpportunityCard({
           key: 'large',
           icon: <Weight className="size-3.5" />,
           label: '대용량',
-          hint: largeHint,
+          // 현재 설정이 아니라 이 수치를 낸 기준 — 스캔 뒤 설정을 바꿔도 문구가 수치를 배신하지 않는다
+          hint: `${formatBytes(opportunities.thresholds.largeFileBytes, 0)} 이상`,
           group: opportunities.large,
           needsReview: true,
           open: null
@@ -69,7 +61,7 @@ export function OpportunityCard({
           key: 'old',
           icon: <Clock className="size-3.5" />,
           label: '오래된 파일',
-          hint: oldHint,
+          hint: `${opportunities.thresholds.oldFileDays}일 넘게 손대지 않음`,
           group: opportunities.old,
           needsReview: true,
           open: null
@@ -116,7 +108,7 @@ export function OpportunityCard({
 
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline gap-2">
-                  <span className="text-xs font-medium">{row.label}</span>
+                  <span className="shrink-0 text-xs font-medium whitespace-nowrap">{row.label}</span>
                   <span className="text-muted-foreground truncate text-[11px]">{row.hint}</span>
                 </div>
 

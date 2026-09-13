@@ -1,6 +1,7 @@
 import type { FileEntry, Opportunities, ScanProgress, ScanResult } from '@shared/types'
 import { hashHead } from '../lib/hash'
 import { beginActivity } from './activity'
+import { createCategorizer } from './categorize'
 import { mergeEntries, scanFolders } from './scanner'
 import {
   groupDuplicates,
@@ -79,6 +80,8 @@ async function scanOnce(onProgress?: (progress: ScanProgress) => void): Promise<
 
   const scans = await scanFolders(settings.watchedFolders, {
     excludedDirNames: settings.excludedDirNames,
+    // 사용자 규칙으로 분류한다 — 계획(plan.ts)도 같은 규칙을 쓰므로 집계의 '이미지'가 계획의 '이미지'다
+    categorize: createCategorizer(settings.rules),
     onProgress
   })
 
@@ -100,14 +103,17 @@ async function scanOnce(onProgress?: (progress: ScanProgress) => void): Promise<
   lastDuplicateGroups = duplicateGroups
   lastScannedAt = startedAt
 
-  const largeEntries = selectLarge(entries, settings.largeFileBytes)
-  const oldEntries = selectOld(entries, settings.oldFileDays)
+  const { largeFileBytes, oldFileDays } = settings
+  const largeEntries = selectLarge(entries, largeFileBytes)
+  const oldEntries = selectOld(entries, oldFileDays)
 
   const opportunities: Opportunities = {
     duplicates,
     large: toOpportunityGroup(largeEntries),
     old: toOpportunityGroup(oldEntries),
     temp,
+    // 수치를 낸 기준을 같이 싣는다 — 스캔 뒤 설정이 바뀌어도 카드의 문구가 수치와 어긋나지 않게
+    thresholds: { largeFileBytes, oldFileDays },
     // 중복 후보는 스캔 폴더 안, 임시파일은 그 밖이라 두 값은 겹치지 않는다
     reclaimableBytes: duplicates.bytes + temp.bytes,
     reviewBytes: unionBytes(largeEntries, oldEntries)

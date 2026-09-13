@@ -8,7 +8,7 @@ import {
   type SkippedItem
 } from '@shared/types'
 import { pathKey } from '../lib/paths'
-import { categorize, extensionOf } from './categorize'
+import { categorize, extensionOf, type Categorizer } from './categorize'
 
 /**
  * 감시 폴더 **바로 아래** 항목만 정리 대상으로 뽑는다.
@@ -41,6 +41,8 @@ export interface TopLevelListing {
 export interface TopLevelOptions {
   /** 스캐너가 내려가지 않은 폴더 이름(소문자 비교). 용량을 모르니 계획에서도 뺀다 */
   excludedDirNames?: readonly string[]
+  /** 확장자 → 카테고리. 스캔과 같은 규칙으로 만든 것을 plan.ts 가 넘긴다. 없으면 기본 규칙 */
+  categorize?: Categorizer
 }
 
 export function skippedItem(path: string, name: string, reason: SkipReason): SkippedItem {
@@ -129,6 +131,7 @@ export async function listTopLevel(
   const dirents = await readTopLevel(root)
   const buckets = indexEntries(root, entries)
   const excluded = new Set((options.excludedDirNames ?? []).map((n) => n.toLowerCase()))
+  const categoryOf = options.categorize ?? categorize
 
   const items: OrganizeItem[] = []
   const skipped: SkippedItem[] = []
@@ -206,7 +209,7 @@ export async function listTopLevel(
       ext,
       size: entry.size,
       mtimeMs: entry.mtimeMs,
-      category: categorize(ext)
+      category: categoryOf(ext)
     })
   }
 

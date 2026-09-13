@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import type { OrganizeItem } from '@shared/types'
+import type { CategoryRule, OrganizeItem } from '@shared/types'
+import { defaultRules } from '@shared/rules'
 import { buildRulePlan } from '../src/main/services/planner'
 import { skippedItem, type TopLevelListing } from '../src/main/services/topLevel'
 
@@ -120,5 +121,66 @@ describe('buildRulePlan', () => {
 
     expect(plan.skipped).toEqual(skipped)
     expect(plan).toMatchObject({ id: 'plan-1', createdAt: NOW, root: ROOT })
+  })
+})
+
+describe('buildRulePlan — 사용자 규칙', () => {
+  const withRules = (patch: (rule: CategoryRule) => CategoryRule): typeof OPTS & { rules: CategoryRule[] } => ({
+    ...OPTS,
+    rules: defaultRules().map(patch)
+  })
+
+  it('규칙의 폴더 이름으로 보낸다', () => {
+    const plan = buildRulePlan(
+      ROOT,
+      listing([file('photo.jpg', { category: 'image' })]),
+      withRules((r) => (r.category === 'image' ? { ...r, folderName: '사진' } : r))
+    )
+
+    expect(plan.items[0]?.toFolder).toBe('사진')
+    expect(plan.items[0]?.reason).toBe('.jpg → 사진')
+    expect(plan.folders.map((f) => f.name)).toEqual(['사진'])
+  })
+
+  it('꺼 둔 카테고리의 파일은 그대로 두고 이유를 적는다', () => {
+    const plan = buildRulePlan(
+      ROOT,
+      listing([file('main.ts', { category: 'code' }), file('photo.jpg', { category: 'image' })]),
+      withRules((r) => (r.category === 'code' ? { ...r, enabled: false } : r))
+    )
+
+    expect(plan.items.map((p) => p.toFolder)).toEqual([null, '이미지'])
+    expect(plan.items[0]?.reason).toContain('꺼져 있다')
+    expect(plan.folders.map((f) => f.name)).toEqual(['이미지'])
+  })
+
+  it('꺼 둔 카테고리의 폴더 이름과 같은 폴더는 목적지가 아니므로 항목으로 남는다', () => {
+    const plan = buildRulePlan(
+      ROOT,
+      listing([dir('코드'), file('main.ts', { category: 'code' })]),
+      withRules((r) => (r.category === 'code' ? { ...r, enabled: false } : r))
+    )
+
+    expect(plan.items.map((p) => p.item.name)).toEqual(['코드', 'main.ts'])
+    expect(plan.skipped).toEqual([])
+  })
+
+  it('두 카테고리가 같은 폴더 이름을 쓰면 폴더 하나로 모은다 (카테고리 순서의 첫 표기로)', () => {
+    const plan = buildRulePlan(
+      ROOT,
+      listing([file('clip.mp4', { category: 'video' }), file('photo.jpg', { category: 'image' })]),
+      withRules((r) =>
+        r.category === 'image' ? { ...r, folderName: 'Media' } : r.category === 'video' ? { ...r, folderName: 'media' } : r
+      )
+    )
+
+    // image 가 video 보다 앞이라 'Media' 표기. 판이 열을 이름으로 찾으므로 두 표기로 갈리면 안 된다
+    expect(plan.items.map((p) => p.toFolder)).toEqual(['Media', 'Media'])
+    expect(plan.folders).toEqual([{ name: 'Media', description: '', existing: false, origin: 'rule' }])
+  })
+
+  it('규칙을 넘기지 않으면 기본 규칙이다', () => {
+    const plan = buildRulePlan(ROOT, listing([file('photo.jpg', { category: 'image' })]), OPTS)
+    expect(plan.items[0]?.toFolder).toBe('이미지')
   })
 })

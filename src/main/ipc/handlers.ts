@@ -1,6 +1,6 @@
 import { lstat, mkdir, rename, rmdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron'
 import { CH } from '@shared/channels'
 import type { ExecuteRequest, Settings, TrashRequest } from '@shared/types'
 import { listApps } from '../services/apps'
@@ -51,7 +51,12 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(CH.drivesList, () => listDrives())
 
   ipcMain.handle(CH.settingsGet, () => getSettings())
-  ipcMain.handle(CH.settingsUpdate, (_event, patch: Partial<Settings>) => updateSettings(patch))
+  ipcMain.handle(CH.settingsUpdate, async (_event, patch: Partial<Settings>) => {
+    const next = await updateSettings(patch)
+    // 네이티브 컨트롤(스크롤바·select 목록)도 화면 테마를 따라간다. 시작 때는 main/index.ts 가 같은 일을 한다
+    nativeTheme.themeSource = next.theme
+    return next
+  })
 
   ipcMain.handle(CH.foldersPick, async (event) => {
     const window = BrowserWindow.fromWebContents(event.sender)

@@ -1,7 +1,8 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, normalize } from 'node:path'
 import { app, safeStorage } from 'electron'
-import type { Settings } from '@shared/types'
+import { THEMES, type Settings, type Theme } from '@shared/types'
+import { defaultRules, normalizeRules } from '@shared/rules'
 import { pathKey } from '../lib/paths'
 
 const MB = 1024 * 1024
@@ -36,7 +37,10 @@ export function defaultSettings(): Settings {
     watchedFolders: [app.getPath('downloads'), app.getPath('desktop')],
     excludedDirNames: DEFAULT_EXCLUDED_DIR_NAMES,
     largeFileBytes: 100 * MB,
-    oldFileDays: 180
+    oldFileDays: 180,
+    rules: defaultRules(),
+    // 지금까지의 모습이 다크다. index.html 의 class="dark" 와 main/index.ts 의 창 배경색도 이 값을 전제한다
+    theme: 'dark'
   }
 }
 
@@ -63,6 +67,9 @@ const isStringArray = (v: unknown): v is string[] =>
 const isPositiveNumber = (v: unknown): v is number =>
   typeof v === 'number' && Number.isFinite(v) && v > 0
 
+const isTheme = (v: unknown): v is Theme =>
+  typeof v === 'string' && (THEMES as readonly string[]).includes(v)
+
 /**
  * 어디서 왔든(파일, IPC patch) 설정을 이 함수 하나로 정규화한다.
  *
@@ -85,7 +92,10 @@ function normalizeSettings(raw: unknown, defaults: Settings): Settings {
       ? r.excludedDirNames
       : defaults.excludedDirNames,
     largeFileBytes: isPositiveNumber(r.largeFileBytes) ? r.largeFileBytes : defaults.largeFileBytes,
-    oldFileDays: isPositiveNumber(r.oldFileDays) ? r.oldFileDays : defaults.oldFileDays
+    oldFileDays: isPositiveNumber(r.oldFileDays) ? r.oldFileDays : defaults.oldFileDays,
+    // 항상 카테고리마다 하나로 맞춘다. 빠진 카테고리는 defaults(갱신이면 현재 값)의 것
+    rules: normalizeRules(r.rules, defaults.rules),
+    theme: isTheme(r.theme) ? r.theme : defaults.theme
   }
 }
 

@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import type { FileEntry, ScanProgress } from '@shared/types'
 import { isCloudOnly } from '../lib/cloudOnly'
 import { pathKey } from '../lib/paths'
-import { categorize, extensionOf } from './categorize'
+import { categorize, extensionOf, type Categorizer } from './categorize'
 
 // 판정 자체는 lib/cloudOnly.ts 에 있다 — 파일을 여는 hashFull 도 같은 함수를 쓴다
 export { isCloudOnly }
@@ -14,6 +14,8 @@ const PROGRESS_INTERVAL = 250
 export interface ScanOptions {
   /** 이 이름의 디렉터리는 통째로 건너뛴다 (소문자로 비교) */
   excludedDirNames?: string[]
+  /** 확장자 → 카테고리. 사용자 규칙(Settings.rules)으로 만든 것을 scan.ts 가 넘긴다. 없으면 기본 규칙 */
+  categorize?: Categorizer
   onProgress?: (progress: ScanProgress) => void
 }
 
@@ -76,6 +78,7 @@ export async function scanFolder(
   counter = { filesSeen: 0 }
 ): Promise<FolderScan> {
   const excluded = new Set((options.excludedDirNames ?? []).map((name) => name.toLowerCase()))
+  const categoryOf = options.categorize ?? categorize
   const entries: FileEntry[] = []
   let skippedCount = 0
 
@@ -115,7 +118,7 @@ export async function scanFolder(
             size: stats.size,
             mtimeMs: stats.mtimeMs,
             atimeMs: stats.atimeMs,
-            category: categorize(ext),
+            category: categoryOf(ext),
             isCloudOnly: isCloudOnly(stats)
           })
 

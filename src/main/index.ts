@@ -1,8 +1,13 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, nativeTheme, shell } from 'electron'
+import type { Theme } from '@shared/types'
 import { registerIpcHandlers } from './ipc/handlers'
+import { getSettings } from './services/store'
 
-function createWindow(): void {
+/** index.css 의 --background 와 같은 값. 첫 페인트 전에 창이 이 색으로 채워진다 */
+const WINDOW_BACKGROUND: Record<Theme, string> = { dark: '#020617', light: '#ffffff' }
+
+function createWindow(theme: Theme): void {
   const win = new BrowserWindow({
     width: 1280,
     height: 860,
@@ -11,8 +16,8 @@ function createWindow(): void {
     show: false,
     autoHideMenuBar: true,
     title: 'PC 정리 도구',
-    // 창이 흰색으로 번쩍였다가 어두워지는 걸 막는다
-    backgroundColor: '#020617',
+    // 창이 다른 색으로 번쩍였다가 테마 색이 되는 걸 막는다
+    backgroundColor: WINDOW_BACKGROUND[theme],
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       // renderer는 Node에 손댈 수 없다. 파일시스템은 전부 main에서만 만진다.
@@ -47,12 +52,22 @@ function createWindow(): void {
   }
 }
 
-void app.whenReady().then(() => {
+/**
+ * 저장된 테마를 창을 만들기 **전에** 읽는다 — 네이티브 컨트롤(스크롤바·select 목록)과 창 배경색이 첫 프레임부터
+ * 맞게. 사용자가 테마를 바꾸면 settings:update 핸들러가 nativeTheme 을 같은 방식으로 따라간다
+ */
+async function openWindow(): Promise<void> {
+  const { theme } = await getSettings()
+  nativeTheme.themeSource = theme
+  createWindow(theme)
+}
+
+void app.whenReady().then(async () => {
   registerIpcHandlers()
-  createWindow()
+  await openWindow()
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) void openWindow()
   })
 })
 

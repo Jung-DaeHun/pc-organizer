@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type JSX } from 'react'
-import { ListChecks, Loader2, ScanLine } from 'lucide-react'
+import { ListChecks, Loader2, ScanLine, Settings as SettingsIcon } from 'lucide-react'
 import type { DriveInfo, Settings } from '@shared/types'
 import { Button } from '@/components/ui/button'
 import { ApiKeyCard } from '@/components/ApiKeyCard'
@@ -20,6 +20,8 @@ interface DashboardProps {
   onOpenPlan: () => void
   /** 중복 후보 정리 화면 (읽기 전용 목록). 스캔 결과가 있어야 연다 */
   onOpenTrash: () => void
+  /** 설정 화면 (테마 · 분류 규칙 · 판정 기준) */
+  onOpenSettings: () => void
 }
 
 export default function Dashboard({
@@ -29,7 +31,8 @@ export default function Dashboard({
   hasApiKey,
   onApiKeyChange,
   onOpenPlan,
-  onOpenTrash
+  onOpenTrash,
+  onOpenSettings
 }: DashboardProps): JSX.Element {
   const [drives, setDrives] = useState<DriveInfo[] | null>(null)
   const { result, progress, isScanning, error, run, invalidate } = scan
@@ -91,6 +94,9 @@ export default function Dashboard({
         </div>
 
         <div className="flex items-center gap-2">
+          <Button variant="ghost" size="icon" onClick={onOpenSettings} aria-label="설정" title="설정">
+            <SettingsIcon />
+          </Button>
           <Button
             variant="outline"
             onClick={onOpenPlan}
@@ -111,14 +117,14 @@ export default function Dashboard({
         <div className="text-destructive border-b px-6 py-2 text-xs">스캔 실패: {error}</div>
       )}
 
-      <main className="grid flex-1 grid-cols-1 content-start items-start gap-4 overflow-y-auto p-6 lg:grid-cols-2">
-        <div className="flex flex-col gap-4">
-          <DriveCard drives={drives} />
-          <AppsCard />
-          <ApiKeyCard hasKey={hasApiKey} onChange={onApiKeyChange} />
-        </div>
-
-        <div className="flex flex-col gap-4">
+      {/*
+        3열 (wide, 기본 창 크기부터): 드라이브 용량 | 감시 폴더 | 정리 기회 — 위 줄이 현황, 아래 줄(설치된 앱 | 최근 실행 |
+        AI 추천)이 부가. 열마다 카드를 세로로 붙여 쌓는다 (한 줄로 묶으면 짧은 카드 아래가 비어 보인다).
+        2열 (창을 줄였을 때, 최소 창 폭 1024): 열 셋 중 마지막이 아래로 접힌다. DOM 순서를 감시 폴더 → 정리 기회 →
+        드라이브로 두고 wide 에서만 order 로 드라이브를 앞에 세워, 접혔을 때 아래로 가는 건 정리 흐름이 아니라 현황이다
+      */}
+      <main className="grid flex-1 grid-cols-2 content-start items-start gap-4 overflow-y-auto p-6 wide:grid-cols-3">
+        <div className="flex flex-col gap-4 wide:order-2">
           <FolderSummaryCard
             settings={settings}
             result={result}
@@ -126,12 +132,20 @@ export default function Dashboard({
             onAddFolder={() => void addFolder()}
             onRemoveFolder={(path) => void removeFolder(path)}
           />
+          <RecentRunCard scanning={isScanning} onFilesMoved={invalidate} />
+        </div>
+
+        <div className="flex flex-col gap-4 wide:order-3">
           <OpportunityCard
             opportunities={result?.opportunities ?? null}
-            settings={settings}
             onOpenTrash={canPlan ? onOpenTrash : null}
           />
-          <RecentRunCard scanning={isScanning} onFilesMoved={invalidate} />
+          <ApiKeyCard hasKey={hasApiKey} onChange={onApiKeyChange} />
+        </div>
+
+        <div className="flex flex-col gap-4 wide:order-1">
+          <DriveCard drives={drives} />
+          <AppsCard />
         </div>
       </main>
     </div>

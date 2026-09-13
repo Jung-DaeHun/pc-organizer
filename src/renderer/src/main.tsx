@@ -2,7 +2,11 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { applyCachedTheme } from './lib/theme'
 import './index.css'
+
+// 저장된 테마로 첫 페인트를 시작한다 (설정이 IPC 로 오면 App 이 그 값으로 다시 맞춘다)
+applyCachedTheme()
 
 // 탐색기에서 끌어온 파일을 창 어디에 놓아도 Chromium 이 그 파일로 이동하지 않게 막는다.
 // 놓기(drop)의 기본 동작이 '파일 열기' 라, dragover 와 drop 둘 다 막아야 한다.

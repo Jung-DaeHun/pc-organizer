@@ -11,8 +11,9 @@ import { cn } from '@/lib/utils'
 /**
  * 색은 카테고리에 고정으로 붙는다. 정렬 순서나 항목 개수가 바뀌어도 '이미지'는 늘 같은 색이다.
  * (순위에 색을 붙이면 필터를 걸 때마다 색이 뒤바뀌어 읽는 사람이 매번 다시 익혀야 한다)
+ * 설정의 분류 규칙 화면도 같은 표를 써서 카테고리를 같은 색으로 가리킨다.
  */
-const CATEGORY_COLOR: Record<FileCategory, string> = {
+export const CATEGORY_COLOR: Record<FileCategory, string> = {
   document: 'var(--chart-document)',
   image: 'var(--chart-image)',
   video: 'var(--chart-video)',

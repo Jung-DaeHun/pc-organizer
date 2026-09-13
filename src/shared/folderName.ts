@@ -5,10 +5,11 @@
 
 export const MAX_FOLDER_NAME_LENGTH = 60
 
-/** 윈도우 파일 이름에 못 쓰는 문자 */
-const FORBIDDEN_CHARS = /[\\/:*?"<>|]/
+/** 윈도우 파일 이름에 못 쓰는 문자. 확장자(rules.ts)도 파일 이름의 일부라 같은 검사를 쓴다 */
+export const FORBIDDEN_CHARS = /[\\/:*?"<>|]/
 /** 제어 문자(0x00-0x1f)도 못 쓴다. 정규식에 넣으면 no-control-regex 에 걸려 따로 본다 */
-const hasControlChar = (s: string): boolean => [...s].some((ch) => ch.charCodeAt(0) < 0x20)
+export const hasControlChar = (s: string): boolean =>
+  [...s].some((ch) => ch.charCodeAt(0) < 0x20)
 /** 확장자를 떼고 봐도 예약어면 안 된다 ('CON.txt' 도 못 만든다) */
 const RESERVED_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i
 
