@@ -25,6 +25,10 @@ function entry(id: string, executedAt: number, extra: Partial<UndoEntry> = {}): 
   return { id, executedAt, root: 'C:\\r', results: [], createdFolders: [], ...extra }
 }
 
+function trashEntry(id: string, executedAt: number): TrashEntry {
+  return { kind: 'trash', id, executedAt, results: [], keptPaths: [] }
+}
+
 describe('journal — 실행 기록 저장', () => {
   it('없는 파일은 빈 목록, 저장하면 최근 것이 앞', async () => {
     const path = join(base, 'a', 'journal.json')
@@ -52,6 +56,26 @@ describe('journal — 실행 기록 저장', () => {
     const all = await readJournal(path)
     expect(all).toHaveLength(JOURNAL_LIMIT)
     expect(all[0]?.id).toBe(`e${JOURNAL_LIMIT + 4}`)
+  })
+
+  it('한도는 종류마다 따로다 — 휴지통 기록이 쌓여도 되돌릴 수 있는 이동 기록은 밀려나지 않는다', async () => {
+    const path = join(base, 'c3', 'journal.json')
+    await saveEntry(path, entry('move', 1))
+    for (let i = 0; i < JOURNAL_LIMIT + 5; i += 1) await saveEntry(path, trashEntry(`t${i}`, 100 + i))
+
+    const all = await readJournal(path)
+    expect(all.filter((e) => e.kind === 'trash')).toHaveLength(JOURNAL_LIMIT)
+    expect(await findEntry(path, 'move')).toMatchObject({ id: 'move' })
+    expect(await findEntry(path, 't0')).toBeNull()
+
+    // 반대 방향도 같다 — 이동이 쌓여도 휴지통 기록은 그대로
+    for (let i = 0; i < JOURNAL_LIMIT + 5; i += 1) await saveEntry(path, entry(`m${i}`, 1000 + i))
+    const again = await readJournal(path)
+    expect(again.filter((e) => e.kind === 'trash')).toHaveLength(JOURNAL_LIMIT)
+    expect(again.filter((e) => e.kind !== 'trash')).toHaveLength(JOURNAL_LIMIT)
+    // 이동 한도 안에서는 가장 오래된 것이라 밀려난다
+    expect(await findEntry(path, 'move')).toBeNull()
+    expect(await findEntry(path, `t${JOURNAL_LIMIT + 4}`)).toMatchObject({ kind: 'trash' })
   })
 
   it('꽉 찬 저널에 기존 항목보다 과거 시각으로 저장해도 방금 저장한 항목은 남는다 (시계가 뒤로 간 뒤)', async () => {

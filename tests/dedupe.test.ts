@@ -1,6 +1,6 @@
 import { lstat, mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, join, parse } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FileEntry, TrashItem } from '@shared/types'
 
@@ -27,6 +27,7 @@ vi.mock('../src/main/services/scan', () => ({
 }))
 
 import { NODE_HASH_IO } from '../src/main/lib/hash'
+import type { RecycleBinLookup } from '../src/main/lib/recycleBin'
 import { beginActivity, currentActivity } from '../src/main/services/activity'
 import {
   buildTrashPlan,
@@ -253,6 +254,9 @@ function fakeTrashIo(trashDir: string): { io: ExecutorIo; trashed: string[] } {
   return { io, trashed }
 }
 
+/** 휴지통이 넉넉한 볼륨. 한도에 걸리는 경우는 따로 만든다 */
+const roomyRecycleBin: RecycleBinLookup = async () => ({ maxFileBytes: 1024 * 1024 * 1024, bypassed: false })
+
 /** 임시 루트에 같은 내용 사본들을 만들고 scan 모듈 흉내를 그 그룹으로 채운다 */
 async function fixture(name: string): Promise<{ root: string; trashDir: string; journalPath: string }> {
   const root = join(base, name)
@@ -300,7 +304,13 @@ describe('executeTrashApproved — 실제 파일시스템', () => {
         { groupId: g0.id, keepId: keep0.id },
         { groupId: g1.id, keepId: keep1.id }
       ],
-      { io, hashIo: NODE_HASH_IO, journalPath, onProgress: (p) => progress.push(p.phase) }
+      {
+        io,
+        hashIo: NODE_HASH_IO,
+        recycleBin: roomyRecycleBin,
+        journalPath,
+        onProgress: (p) => progress.push(p.phase)
+      }
     )
 
     expect(outcome.status).toBe('done')
@@ -355,7 +365,7 @@ describe('executeTrashApproved — 실제 파일시스템', () => {
 
     const outcome = await executeTrashApproved(
       plan.groups.map((g) => ({ groupId: g.id, keepId: g.id === g0.id ? keep0.id : g.keepId })),
-      { io, hashIo: NODE_HASH_IO, journalPath }
+      { io, hashIo: NODE_HASH_IO, recycleBin: roomyRecycleBin, journalPath }
     )
 
     expect(outcome.status).toBe('blocked')
@@ -370,6 +380,92 @@ describe('executeTrashApproved — 실제 파일시스템', () => {
     expect(scanState.staleCalls).toBe(0)
   })
 
+  it('보내는 도중 남길 파일이 사라진 그룹은 keeper-missing 으로 건너뛰고, 남긴 파일 수에도 세지 않는다', async () => {
+    const { trashDir, journalPath } = await fixture('keeper-gone')
+    const plan = buildTrashPlan(scanState.scannedAt)
+    const { io, trashed } = fakeTrashIo(trashDir)
+    const g0 = plan.groups.find((g) => g.size === 70_000)!
+    const g1 = plan.groups.find((g) => g.size === 3_000)!
+    const keep0 = g0.items.find((it) => it.id === g0.keepId)!
+    const keep1 = g1.items.find((it) => it.id === g1.keepId)!
+
+    // 사전 점검은 통과했는데, 첫 파일을 보내는 순간 그룹 1 의 남길 파일이 사라진다 (사용자가 옮겼다)
+    const gone = join(base, 'keeper-gone-away')
+    await mkdir(gone, { recursive: true })
+    const sabotaged: ExecutorIo = {
+      ...io,
+      trashItem: async (path) => {
+        if (trashed.length === 0) await rename(keep1.path, join(gone, basename(keep1.path)))
+        await io.trashItem(path)
+      }
+    }
+
+    const outcome = await executeTrashApproved(
+      [
+        { groupId: g0.id, keepId: keep0.id },
+        { groupId: g1.id, keepId: keep1.id }
+      ],
+      { io: sabotaged, hashIo: NODE_HASH_IO, recycleBin: roomyRecycleBin, journalPath }
+    )
+
+    expect(outcome.status).toBe('done')
+    if (outcome.status !== 'done') return
+    const byPath = Object.fromEntries(outcome.entry.results.map((r) => [r.path, r.ok ? 'ok' : r.code]))
+    const targetsOf = (g: typeof g0, keepId: string): TrashItem[] => g.items.filter((it) => it.id !== keepId)
+    expect(byPath).toEqual({
+      ...Object.fromEntries(targetsOf(g0, keep0.id).map((it) => [it.path, 'ok'])),
+      ...Object.fromEntries(targetsOf(g1, keep1.id).map((it) => [it.path, 'keeper-missing']))
+    })
+    expect(trashed).toHaveLength(2)
+    // 남긴 파일은 실제로 보낸 그룹 0 의 것 하나뿐 — 그룹 1 은 남길 파일도 없고 보낸 것도 없다.
+    // 계획 시점의 남길 파일 둘을 그대로 적으면 화면이 "2개 남김"이라고 거짓말한다
+    expect(outcome.entry.keptPaths).toEqual([keep0.path])
+    expect((await readJournal(journalPath))[0]).toMatchObject({ kind: 'trash', keptPaths: [keep0.path] })
+  })
+
+  it('휴지통 최대 크기 이상인 파일이 있으면 아무것도 보내지 않는다 — 파일을 읽기도 전에', async () => {
+    const { root, trashDir, journalPath } = await fixture('too-big')
+    const plan = buildTrashPlan(scanState.scannedAt)
+    const { io, trashed } = fakeTrashIo(trashDir)
+    // 70,000 바이트 그룹만 한도에 걸리는 볼륨. 실제 윈도우라면 trashItem 이 이 파일을 영구 삭제했을 것이다
+    const asked: string[] = []
+    const tightRecycleBin: RecycleBinLookup = async (volumeRoot) => {
+      asked.push(volumeRoot)
+      return { maxFileBytes: 70_000, bypassed: false }
+    }
+    const opened: string[] = []
+    const spyHashIo = {
+      lstat: NODE_HASH_IO.lstat,
+      open: async (path: string) => {
+        opened.push(path)
+        return NODE_HASH_IO.open(path)
+      }
+    }
+
+    const outcome = await executeTrashApproved(
+      plan.groups.map((g) => ({ groupId: g.id, keepId: g.keepId })),
+      { io, hashIo: spyHashIo, recycleBin: tightRecycleBin, journalPath }
+    )
+
+    expect(outcome.status).toBe('blocked')
+    if (outcome.status !== 'blocked') return
+    const g0 = plan.groups.find((g) => g.size === 70_000)!
+    expect(outcome.problems.map((p) => [p.path, p.code]).sort()).toEqual(
+      g0.items
+        .filter((it) => it.id !== g0.keepId)
+        .map((it) => [it.path, 'exceeds-recycle-bin'])
+        .sort()
+    )
+    expect(asked).toEqual([parse(root).root]) // 볼륨 루트 하나, 한 번
+    expect(opened).toEqual([])
+    expect(trashed).toEqual([])
+    expect(await readdir(trashDir)).toEqual([])
+    expect((await listing(root)).filter((p) => p.endsWith('report.pdf'))).toHaveLength(3)
+    expect(await readJournal(journalPath)).toEqual([])
+    expect(getLastTrashPlan()).toBe(plan)
+    expect(scanState.staleCalls).toBe(0)
+  })
+
   it('파일이 움직인 뒤(스캔 목록이 낡음)에는 거부한다', async () => {
     const { trashDir, journalPath } = await fixture('stale')
     const plan = buildTrashPlan(scanState.scannedAt)
@@ -379,7 +475,7 @@ describe('executeTrashApproved — 실제 파일시스템', () => {
     await expect(
       executeTrashApproved([{ groupId: plan.groups[0]!.id, keepId: plan.groups[0]!.keepId }], {
         io,
-        hashIo: NODE_HASH_IO,
+        hashIo: NODE_HASH_IO, recycleBin: roomyRecycleBin,
         journalPath
       })
     ).rejects.toThrow('낡았습니다')
@@ -397,7 +493,7 @@ describe('executeTrashApproved — 실제 파일시스템', () => {
     await expect(
       executeTrashApproved([{ groupId: plan.groups[0]!.id, keepId: plan.groups[0]!.keepId }], {
         io,
-        hashIo: NODE_HASH_IO,
+        hashIo: NODE_HASH_IO, recycleBin: roomyRecycleBin,
         journalPath: join(blocker, 'journal.json')
       })
     ).rejects.toThrow('기록을 남길 수 없어')
@@ -415,7 +511,7 @@ describe('executeTrashApproved — 실제 파일시스템', () => {
       await expect(
         executeTrashApproved([{ groupId: plan.groups[0]!.id, keepId: plan.groups[0]!.keepId }], {
           io,
-          hashIo: NODE_HASH_IO,
+          hashIo: NODE_HASH_IO, recycleBin: roomyRecycleBin,
           journalPath
         })
       ).rejects.toThrow('진행 중')
@@ -430,7 +526,12 @@ describe('executeTrashApproved — 실제 파일시스템', () => {
     buildTrashPlan(scanState.scannedAt)
     const { io, trashed } = fakeTrashIo(trashDir)
     await expect(
-      executeTrashApproved([{ groupId: 'nope', keepId: 'x' }], { io, hashIo: NODE_HASH_IO, journalPath })
+      executeTrashApproved([{ groupId: 'nope', keepId: 'x' }], {
+        io,
+        hashIo: NODE_HASH_IO,
+        recycleBin: roomyRecycleBin,
+        journalPath
+      })
     ).rejects.toThrow('계획에 없는 그룹')
     expect(trashed).toEqual([])
   })

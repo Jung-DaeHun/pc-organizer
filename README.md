@@ -81,6 +81,8 @@ src/
 └─ renderer/   React UI (Node 접근 권한 없음)
 ```
 
+서비스 목록과 흐름(스캔 → 계획 → 실행 → 실행취소 → 휴지통), IPC 채널을 늘리는 절차는 `architecture.md`에 있다.
+
 **renderer에는 Node 권한을 주지 않는다.** `contextIsolation: true`, `nodeIntegration: false`,
 `sandbox: true`로 두고, preload가 노출한 함수 몇 개로만 main과 통신한다. `ipcRenderer` 자체를
 넘기지 않으므로 UI 코드가 임의의 채널을 부를 수 없다.

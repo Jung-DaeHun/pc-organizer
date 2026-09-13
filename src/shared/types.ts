@@ -469,6 +469,12 @@ export type TrashErrorCode =
   | 'size-changed'
   | 'hash-mismatch'
   | 'keeper-missing'
+  /** 휴지통 최대 크기 이상 — 윈도우가 휴지통을 거치지 않고 영구 삭제하므로 보내지 않는다 */
+  | 'exceeds-recycle-bin'
+  /** 이 드라이브가 '휴지통을 쓰지 않음'으로 설정돼 있다 — 삭제가 곧 영구 삭제 */
+  | 'recycle-bin-off'
+  /** 휴지통 설정을 읽지 못했다 (드라이브 문자가 없는 경로, 조회 실패) — 영구 삭제일 수 있어 보내지 않는다 */
+  | 'recycle-bin-unknown'
   | 'io'
 
 export const TRASH_ERROR_LABELS: Record<TrashErrorCode, string> = {
@@ -477,7 +483,12 @@ export const TRASH_ERROR_LABELS: Record<TrashErrorCode, string> = {
   'cloud-only': '클라우드 전용 파일입니다 (내려받기 전에는 비교할 수 없습니다)',
   'size-changed': '스캔 뒤에 크기가 바뀌었습니다',
   'hash-mismatch': '전체 내용을 비교하니 다른 파일입니다',
-  'keeper-missing': '남기기로 한 파일이 사라져 나머지를 보내지 않았습니다',
+  'keeper-missing': '남기기로 한 파일이 사라졌거나 바뀌어 나머지를 보내지 않았습니다',
+  'exceeds-recycle-bin':
+    '이 드라이브의 휴지통 최대 크기보다 큰 파일입니다 (윈도우가 휴지통을 거치지 않고 영구 삭제하므로 보내지 않습니다)',
+  'recycle-bin-off':
+    '이 드라이브는 휴지통을 쓰지 않도록 설정돼 있습니다 (삭제가 곧 영구 삭제라 보내지 않습니다)',
+  'recycle-bin-unknown': '이 드라이브의 휴지통 설정을 확인할 수 없습니다 (영구 삭제일 수 있어 보내지 않습니다)',
   io: '파일시스템 오류'
 }
 
@@ -503,7 +514,10 @@ export interface TrashEntry {
   id: string
   executedAt: number
   results: TrashResult[]
-  /** 그룹마다 남긴 파일의 경로. "무엇이 남았나"를 기록에서 볼 수 있게 */
+  /**
+   * 파일을 실제로 보낸 그룹마다 남긴 파일의 경로. "무엇이 남았나"를 기록에서 볼 수 있게.
+   * 실행 중 남길 파일이 사라져 그 그룹을 하나도 보내지 않았으면 여기 없다 — 계획 시점의 남길 파일 목록이 아니다
+   */
   keptPaths: string[]
 }
 

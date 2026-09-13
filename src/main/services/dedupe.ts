@@ -10,6 +10,7 @@ import type {
   TrashRequest
 } from '@shared/types'
 import type { HashIo } from '../lib/hash'
+import type { RecycleBinLookup } from '../lib/recycleBin'
 import { assertIdle, beginActivity } from './activity'
 import { executeTrash, preflightTrash, resolveTrash, type ExecutorIo } from './executor'
 import { saveEntry } from './journal'
@@ -129,6 +130,8 @@ export interface TrashDeps {
   io: ExecutorIo
   /** 읽기 I/O (lstat · open). 전체 해시 비교에 쓴다 */
   hashIo: HashIo
+  /** 볼륨의 휴지통 설정 조회 (읽기 전용). 한도 이상인 파일은 trashItem 이 영구 삭제하므로 보내기 전에 본다 */
+  recycleBin: RecycleBinLookup
   /** userData/journal.json. 경로도 handlers.ts 가 넘긴다 (서비스는 electron 을 모른다) */
   journalPath: string
   onProgress?: (progress: TrashProgress) => void
@@ -139,8 +142,8 @@ export interface TrashDeps {
  *
  * 순서: 자물쇠(activity.ts — 스캔·실행·실행취소와 겹치지 않게) → 계획이 화면이 본 스캔의 것인지(scannedAt —
  * 파일이 움직였으면 markStale 로 어긋나 있다) → lastTrashPlan 과 대조(resolveTrash — 하나라도 어긋나면 전체
- * 거부) → 읽기 전용 사전 점검(preflightTrash — lstat 과 전체 해시, 하나라도 걸리면 아무것도 보내지 않고
- * 'blocked') → 빈 기록을 저널에 먼저 저장(기록을 남길 수 없으면 보내지 않는다) → 파일마다 보내고 기록 갱신 →
+ * 거부) → 읽기 전용 사전 점검(preflightTrash — 휴지통 설정·lstat·전체 해시, 하나라도 걸리면 아무것도 보내지
+ * 않고 'blocked') → 빈 기록을 저널에 먼저 저장(기록을 남길 수 없으면 보내지 않는다) → 파일마다 보내고 기록 갱신 →
  * 계획·스캔 목록을 버린다(다시 스캔해야 한다).
  */
 export async function executeTrashApproved(
@@ -159,15 +162,18 @@ export async function executeTrashApproved(
     }
     const jobs = resolveTrash(plan, requests)
 
-    const problems = await preflightTrash(jobs, deps.hashIo, deps.onProgress)
+    const problems = await preflightTrash(jobs, deps.hashIo, deps.recycleBin, deps.onProgress)
     if (problems.length > 0) return { status: 'blocked', problems }
 
+    // 남긴 파일은 실제로 보낸 그룹의 것만 센다 — 보내는 도중 남길 파일이 사라진 그룹은 하나도 보내지 않았고
+    // 남긴 것도 없다. 계획 시점에 채워 두면 화면의 "N개 남김"이 실제보다 많아진다
+    const keeperOf = new Map(jobs.flatMap((job) => job.targets.map((t) => [t.id, job.keeper.path])))
     const entry: TrashEntry = {
       kind: 'trash',
       id: randomUUID(),
       executedAt: Date.now(),
       results: [],
-      keptPaths: jobs.map((job) => job.keeper.path)
+      keptPaths: []
     }
     try {
       await saveEntry(deps.journalPath, entry)
@@ -183,6 +189,8 @@ export async function executeTrashApproved(
       onProgress: deps.onProgress,
       onResult: async (result) => {
         entry.results.push(result)
+        const kept = result.ok ? keeperOf.get(result.id) : undefined
+        if (kept && !entry.keptPaths.includes(kept)) entry.keptPaths.push(kept)
         await saveEntry(deps.journalPath, entry)
       }
     })

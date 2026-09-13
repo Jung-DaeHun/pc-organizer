@@ -14,8 +14,15 @@ import type { ExecutionResult, JournalEntry, TrashEntry, TrashResult, UndoEntry 
  * 이전 기록이 깨지지 않는다 — 기록이 깨지면 되돌릴 길이 사라진다.
  */
 
-/** 이만큼만 남긴다. 실행취소는 최근 것에 하는 일이고, 오래된 기록은 파일이 이미 다른 곳에 가 있기 쉽다 */
+/**
+ * **종류마다** 이만큼만 남긴다 (이동 20 + 휴지통 20). 실행취소는 최근 것에 하는 일이고, 오래된 기록은 파일이 이미
+ * 다른 곳에 가 있기 쉽다. 한도를 같이 쓰면 되돌릴 수 없는 휴지통 기록이 쌓일수록 되돌릴 수 있는 이동 기록이
+ * 밀려난다
+ */
 export const JOURNAL_LIMIT = 20
+
+/** kind 가 없는 옛 기록은 이동이다 */
+const kindOf = (entry: JournalEntry): 'move' | 'trash' => entry.kind ?? 'move'
 
 const isStringArray = (v: unknown): v is string[] =>
   Array.isArray(v) && v.every((s) => typeof s === 'string')
@@ -105,7 +112,7 @@ async function writeJournal(path: string, entries: readonly JournalEntry[]): Pro
 
 /**
  * 기록 하나를 넣거나(같은 id 면) 갈아 끼운다. 실행 도중 항목마다 부르므로 같은 id 가 여러 번 온다.
- * 최근 JOURNAL_LIMIT 개만 남긴다.
+ * 종류마다 최근 JOURNAL_LIMIT 개만 남긴다 — 다른 종류의 기록은 이 저장으로 밀려나지 않는다.
  *
  * 저장하려는 항목은 **무조건 남긴다** — 시각으로 정렬한 뒤 자르면, 시계가 뒤로 간 뒤라 기존 항목의
  * executedAt 이 더 미래일 때 방금 실행한 기록이 잘려 나간다. 그러면 예외 없이 "기록이 없는 실행"이
@@ -113,7 +120,10 @@ async function writeJournal(path: string, entries: readonly JournalEntry[]): Pro
  */
 export async function saveEntry(path: string, entry: JournalEntry): Promise<void> {
   const others = (await readJournal(path)).filter((e) => e.id !== entry.id)
-  await writeJournal(path, [entry, ...others.slice(0, JOURNAL_LIMIT - 1)])
+  const kind = kindOf(entry)
+  const sameKind = others.filter((e) => kindOf(e) === kind).slice(0, JOURNAL_LIMIT - 1)
+  const otherKind = others.filter((e) => kindOf(e) !== kind).slice(0, JOURNAL_LIMIT)
+  await writeJournal(path, [entry, ...sameKind, ...otherKind])
 }
 
 export async function findEntry(path: string, id: string): Promise<JournalEntry | null> {

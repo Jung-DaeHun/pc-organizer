@@ -33,7 +33,7 @@ function trashSummary(entry: TrashEntry): string {
   const bytes = ok.reduce((n, r) => n + r.size, 0)
   const parts = [`${formatCount(ok.length)}개 휴지통으로 (${formatBytes(bytes)})`]
   if (failed > 0) parts.push(`${formatCount(failed)}개 실패`)
-  parts.push(`${formatCount(entry.keptPaths.length)}개 남김`)
+  if (entry.keptPaths.length > 0) parts.push(`${formatCount(entry.keptPaths.length)}개 남김`)
   return parts.join(' · ')
 }
 

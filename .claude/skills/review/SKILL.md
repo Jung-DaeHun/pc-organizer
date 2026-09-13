@@ -105,6 +105,11 @@ grep -n "from 'node:fs" src/main/services/executor.ts src/main/services/undo.ts 
 - `resolveTrash`가 요청을 `lastTrashPlan`과 대조하는가 — 요청은 `{groupId, keepId}` 뿐이고 경로는 계획에서 온다.
   모르는 그룹, 그룹에 없는 `keepId`, 같은 그룹 두 번이면 전체 거부. 남길 파일을 뺀 나머지가 대상이라
   **그룹 전체를 지우는 요청은 만들 수 없다**
+- `preflightTrash`가 **파일을 읽기 전에** 보낼 파일의 볼륨마다 휴지통 설정(`RecycleBinLookup`, `lib/recycleBin.ts`)을
+  보고 한도 이상(`>=`)·휴지통 안 씀·설정 모름이면 막는가 — `shell.trashItem`은 휴지통 최대 크기보다 큰 파일을
+  **오류 없이 영구 삭제한다**(실측). `checkRecycleBin`이 빠지거나 `trashItem`을 이 검사 없이 부르는 경로가 생기면 치명
+- `lib/recycleBin.ts`의 PowerShell 이 `Get-CimInstance`·`Get-ItemProperty` 조회뿐이고, 스크립트에 끼워 넣는 값이
+  `driveLetterOf`가 검증한 드라이브 문자 하나뿐인가
 - `preflightTrash`가 그룹의 **모든** 파일(남길 것 포함)을 `lstat`(존재·일반 파일·크기 동일·클라우드 전용 아님)한 뒤
   `hashFull`로 전체 해시를 비교하고, 하나라도 걸리면 `blocked`로 **아무것도 보내지 않는가**
 - `trashOne`이 보내기 직전에 남길 파일이 아직 있는지(`keeperIntact`) 다시 보는가 — 없으면 `keeper-missing`
@@ -112,7 +117,9 @@ grep -n "from 'node:fs" src/main/services/executor.ts src/main/services/undo.ts 
   저널에 `kind: 'trash'` 빈 기록을 **먼저** 저장(실패면 보내지 않음) → 끝나면 `lastTrashPlan = null`·`clearLastPlan()`·
   `markStale()` 순서인가
 - `undo.ts`가 `kind === 'trash'` 기록을 거부하는가 (앱이 휴지통에서 꺼내는 코드는 없다)
-- `tests/trashExecutor.test.ts`의 "걸리면 trashItem 0회" 테스트가 살아 있는가
+- "걸리면 아무것도 보내지 않는다" 테스트가 살아 있는가 — `tests/dedupe.test.ts`의 "뒷부분이 바뀌었으면 … 아무것도
+  보내지 않는다"·"휴지통 최대 크기 이상인 파일이 있으면 아무것도 보내지 않는다"(실제 fs, `trashed` 빈 배열 + 저널 없음),
+  `tests/trashExecutor.test.ts`의 `describe('휴지통 설정')`(걸리면 `opened`도 빈 배열)
 
 `topLevel.ts`의 `readdir`/`lstat`은 조회다. 레지스트리도 조회만 해야 한다 — `Set-ItemProperty`,
 `Remove-Item`, `New-Item`이 있으면 보고.

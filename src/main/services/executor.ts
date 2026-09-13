@@ -1,4 +1,4 @@
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, parse } from 'node:path'
 import {
   EXEC_ERROR_LABELS,
   TRASH_ERROR_LABELS,
@@ -22,6 +22,7 @@ import { folderKey, sanitizeFolderName } from '@shared/folderName'
 import { isCloudOnly } from '../lib/cloudOnly'
 import { hashFull, type HashIo } from '../lib/hash'
 import { pathKey } from '../lib/paths'
+import type { RecycleBinLookup, RecycleBinPolicy } from '../lib/recycleBin'
 
 /**
  * 정리 계획을 실제로 옮기는 실행기. **이 앱에서 사용자 파일을 움직이거나 휴지통으로 보내는 유일한 로직**이다.
@@ -38,6 +39,11 @@ import { pathKey } from '../lib/paths'
  * 휴지통(B3): 중복 후보 그룹에서 **남길 하나를 뺀 나머지**를 trashItem 으로 윈도우 휴지통에 보낸다.
  * 영구 삭제 호출(unlink·rm)은 없다. 보내기 전에 그룹의 모든 파일(남길 것 포함)을 lstat 하고 전체 해시로
  * 비교해 하나라도 다르면 아무것도 보내지 않으며, 파일마다 보내기 직전에 남길 파일이 아직 있는지 다시 본다.
+ *
+ * **trashItem 자체는 영구 삭제를 막아 주지 않는다.** 윈도우 쉘은 볼륨의 휴지통 최대 크기보다 큰 파일을
+ * "너무 커서 휴지통에 넣을 수 없음" 으로 묻지 않고 영구 삭제하고, '휴지통을 쓰지 않음' 설정이면 전부 영구
+ * 삭제다 (lib/recycleBin.ts 에 실측 기록). 그래서 preflightTrash 가 파일 I/O 보다 먼저 볼륨의 휴지통 설정을
+ * 읽어 한도 이상이거나 설정을 모르면 막는다 — trashItem 은 이 검사를 통과한 파일에만 부른다.
  */
 
 /** lstat 결과 중 실행기가 보는 것. node:fs 의 Stats 가 그대로 맞는다 */
@@ -59,9 +65,9 @@ export interface ExecutorIo {
    */
   rmdir(path: string): Promise<void>
   /**
-   * 파일 하나를 윈도우 휴지통으로 보낸다 (shell.trashItem). 영구 삭제가 아니다 — 사용자가 휴지통에서
-   * 복원할 수 있다. executeTrash 만 부르고, 그 전에 전체 해시 비교(preflightTrash)를 통과해야 한다.
-   * 이 인터페이스에 영구 삭제(unlink·rm)는 없다.
+   * 파일 하나를 윈도우 휴지통으로 보낸다 (shell.trashItem). 사용자가 휴지통에서 복원할 수 있다 — 단,
+   * 휴지통 최대 크기 이상인 파일은 쉘이 영구 삭제하므로 **preflightTrash 의 휴지통 설정 검사와 전체 해시
+   * 비교를 통과한 파일에만** executeTrash 가 부른다. 이 인터페이스에 영구 삭제(unlink·rm)는 없다.
    */
   trashItem(path: string): Promise<void>
 }
@@ -423,8 +429,34 @@ async function checkTrashItem(
 }
 
 /**
+ * 보낼 파일마다 그 볼륨의 휴지통이 받아주는지 (읽기 전용 — 레지스트리 조회). 걸린 것만 돌려준다.
+ *
+ * 볼륨마다 한 번만 조회한다. 드라이브 문자가 없는 경로(UNC 등)와 조회 실패는 '모른다' 이고, 모르면
+ * 보내지 않는다 — trashItem 이 그런 볼륨에서 무엇을 하는지 확인할 길이 없다.
+ */
+async function checkRecycleBin(jobs: readonly TrashJob[], lookup: RecycleBinLookup): Promise<TrashResult[]> {
+  const problems: TrashResult[] = []
+  const policies = new Map<string, RecycleBinPolicy | null>()
+
+  for (const job of jobs) {
+    for (const item of job.targets) {
+      const root = parse(item.path).root
+      if (!policies.has(root)) policies.set(root, await lookup(root))
+      const policy = policies.get(root) ?? null
+
+      if (policy === null) problems.push(trashFail(item, 'recycle-bin-unknown'))
+      else if (policy.bypassed) problems.push(trashFail(item, 'recycle-bin-off'))
+      else if (job.group.size >= policy.maxFileBytes) problems.push(trashFail(item, 'exceeds-recycle-bin'))
+    }
+  }
+  return problems
+}
+
+/**
  * 전부 점검만 한다 — **아무것도 보내지 않는다.** 걸린 것만 돌려준다 (비어 있으면 실행해도 된다).
  *
+ * 0) 보낼 파일의 볼륨마다 휴지통 설정 — 최대 크기 이상이거나, 휴지통을 쓰지 않거나, 설정을 모르면 막는다.
+ *    trashItem 은 이런 파일을 오류 없이 영구 삭제하므로, 파일을 읽기 전에 가장 먼저 본다
  * 1) 모든 그룹의 모든 파일(남길 것 포함)을 lstat — 있고, 일반 파일이고, 크기가 계획과 같고, 클라우드
  *    전용이 아니다. 하나라도 걸리면 여기서 끝낸다(수 GB 를 읽기 전에 멈춘다)
  * 2) 그룹마다 전체 해시 — 남길 파일과 나머지 전부가 같아야 한다. 앞 4KB 만 같았던 '후보'가 여기서 확정된다.
@@ -433,9 +465,11 @@ async function checkTrashItem(
 export async function preflightTrash(
   jobs: readonly TrashJob[],
   hashIo: HashIo,
+  recycleBin: RecycleBinLookup,
   onProgress?: (progress: TrashProgress) => void
 ): Promise<TrashResult[]> {
-  const problems: TrashResult[] = []
+  const problems = await checkRecycleBin(jobs, recycleBin)
+  if (problems.length > 0) return problems
 
   for (const job of jobs) {
     for (const item of [job.keeper, ...job.targets]) {

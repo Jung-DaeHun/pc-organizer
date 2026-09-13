@@ -53,9 +53,19 @@ npx vitest                               # watch 모드
 뿐이고, `TrashItem`은 `PlanItem`과 다른 타입이다. 요청(`TrashRequest`)은 그룹마다 **남길 파일 id** 하나 —
 나머지가 대상이 되므로 그룹을 통째로 지우는 요청은 모양 자체가 없다. `dedupe.ts`의 `executeTrashApproved`가
 조율한다: `lastTrashPlan`과 대조(`resolveTrash`, 하나라도 어긋나면 전체 거부) → 읽기 전용 사전 점검
-(`preflightTrash` — 그룹의 **모든** 파일을 `lstat` 하고 `hashFull`로 **전체 해시**를 비교, 하나라도 다르면
-`blocked`로 아무것도 보내지 않음) → 저널에 `kind: 'trash'` 빈 기록 → 파일마다 **남길 파일이 아직 있는지
-다시 본 뒤** `trashItem`. 끝나면 `markStale()`. 저널의 `kind`가 없는 기록은 이동이다(옛 파일 호환).
+(`preflightTrash` — 볼륨의 휴지통 설정을 본 뒤 그룹의 **모든** 파일을 `lstat` 하고 `hashFull`로 **전체
+해시**를 비교, 하나라도 걸리면 `blocked`로 아무것도 보내지 않음) → 저널에 `kind: 'trash'` 빈 기록 → 파일마다
+**남길 파일이 아직 있는지 다시 본 뒤** `trashItem`. 끝나면 `markStale()`. 저널의 `kind`가 없는 기록은
+이동이다(옛 파일 호환).
+
+**`shell.trashItem`은 영구 삭제를 막아 주지 않는다.** 윈도우 쉘은 볼륨의 휴지통 최대 크기(레지스트리
+`HKCU\…\Explorer\BitBucket\Volume\{GUID}\MaxCapacity`, MiB)보다 큰 파일을 "너무 커서 휴지통에 넣을 수 없음"
+으로 묻지 않고 **오류 없이 영구 삭제**하고(2026-09-13 실측, Electron 44 — `FOF_NO_UI`가 확인을 자동으로
+'예'로 답한다), '휴지통을 쓰지 않음'(`NukeOnDelete`·`NoRecycleFiles` 정책)이면 전부 영구 삭제다. 휴지통이
+없는 볼륨(네트워크·subst)만 거부된다. 그래서 `lib/recycleBin.ts`가 그 설정을 **조회만** 하고(`RecycleBinLookup`,
+`handlers.ts`가 주입), `preflightTrash`가 파일을 읽기 전에 가장 먼저 본다 — 한도 **이상**(`exceeds-recycle-bin`),
+휴지통 안 씀(`recycle-bin-off`), 설정을 모름(드라이브 문자 없는 경로·조회 실패, `recycle-bin-unknown`)이면
+`blocked`. `trashItem`을 이 검사 없이 부르는 경로를 만들지 않는다.
 
 `userData` 아래 쓰기는 `store.ts`(`settings.json`·`secrets.json`)와 `journal.ts`(`journal.json`)만.
 레지스트리는 조회만 한다(`Set-ItemProperty` / `Remove-Item` / `New-Item` 금지).
@@ -144,94 +154,9 @@ AI 추천은 이 앱에서 네트워크로 나가는 유일한 경로다. 보내
 
 ## 아키텍처
 
-```
-src/shared/     main·renderer 공용 계약 (types / channels / api). IPC를 넘는 값은 순수 데이터
-src/main/       파일시스템·레지스트리·네트워크를 만지는 유일한 곳
-  ipc/          채널 등록만. 로직 없음 (API 키로 StructuredCall, node:fs 로 ExecutorIo 를 만들어 주입하는 것까지)
-  services/     scan(조율) · scanner(순회) · opportunities · summarize · categorize · temp · apps · drives · store
-                plan(조율, lastPlan, executeApproved) · topLevel(루트 한 단계) · planner(규칙) · advisor(AI 요청·검증·병합)
-                executor(이동·되돌리기, io 주입) · journal(실행 기록, userData) · undo(조율)
-                activity(스캔·실행·실행취소 자물쇠 — 한 번에 하나만)
-  lib/          powershell · hash · paths · structured(계약) · anthropic(SDK, 유일한 네트워크)
-src/preload/    contextBridge 다리
-src/renderer/   React UI. Node 권한 없음. App 이 view 상태로 Dashboard / PlanPage 를 고른다
-```
-
-**IPC 채널을 하나 추가하려면 네 곳을 같이 고쳐야 한다.** 하나라도 빠지면 런타임에야 드러난다.
-
-1. `src/shared/channels.ts` — 채널 이름
-2. `src/shared/api.ts` — `RendererApi` 인터페이스
-3. `src/main/ipc/handlers.ts` — `ipcMain.handle` 등록
-4. `src/preload/index.ts` — 감싼 함수 노출
-
-**스캔 파이프라인** — `services/scan.ts`가 조율한다. `scanFolders`로 파일 목록을 만들고,
-`findDuplicates`(해시)와 `measureTempAndTrash`를 병렬로 돌린 뒤 집계한다.
-
-원본 `FileEntry[]`는 `scan.ts`의 모듈 변수 `lastEntries`에 **main 쪽에만** 남는다
-(`getLastEntries()`로 꺼낸다). renderer로는 집계 수치만 보낸다 — 파일 수만 개를 IPC로 넘기면
-직렬화 비용만으로 화면이 눈에 띄게 버벅인다. 목록과 `lastScannedAt`은 스캔이 **끝났을 때** 함께
-바뀐다.
-
-**스캔·실행·실행취소는 한 번에 하나만 돈다** — `services/activity.ts`의 자물쇠 하나를 셋이 같이
-잡는다(`beginActivity`, `finally`에서 놓는다). 스캔 도중 파일이 움직이면, 실행취소가 `markStale()`로
-목록을 비워도 스캔이 끝나며 옮기기 전 위치로 잡힌 목록으로 `lastEntries`를 덮어써 그 뒤의 계획이 없는
-파일을 가리킨다. 계획 세우기는 잠그지 않되 `assertIdle`로 아무 작업도 없을 때만 응한다. 세 작업이
-서로의 플래그를 보게 하지 않는다 — 검사가 여섯 곳으로 흩어져 하나만 빠져도 조용히 깨진다.
-
-**정리 계획** — `services/plan.ts`가 조율하고 마지막 계획을 `lastPlan`에 main 쪽에만 둔다.
-`buildPlan(root, scannedAt)`은 renderer가 보고 있는 `ScanResult.scannedAt`과 main의 목록이 같은
-스캔인지 확인한 뒤에만 응한다. 대상은 감시 폴더 **바로 아래**의 파일과 폴더(통째로)뿐이다
-(`topLevel.ts` — 루트 한 단계만 `readdir`, 폴더 용량은 `lastEntries`를 경로 접두로 집계).
-`planner.ts`가 확장자 규칙으로 초안을 만들고 `advisor.ts`가 그 위에 AI 추천을 얹는다.
-`OrganizePlan`은 유한한 목록이라 renderer로 넘기지만, 실행은 renderer가 돌려보낸 `{id, toFolder}`를
-`lastPlan`과 대조한 뒤에만 한다. 클라우드 전용 파일·링크·`desktop.ini`는 계획에서 뺀다(`skipped`에 이유
-코드와 함께). 바로가기(`.lnk`·`.url`)는 정리 대상이다 — 어디로 옮겨도 그대로 열린다.
-
-**실행** — `plan.ts`의 `executeApproved(requests, {io, journalPath, onProgress})`가 조율한다.
-`executor.ts`의 `resolveMoves`(계획 대조) → `preflight`(읽기 전용 점검, 하나라도 걸리면 `blocked`) →
-저널에 빈 기록 저장 → `executeMoves`(항목마다 `mkdir`+`rename`, 실패해도 계속, 결과마다 저널 갱신).
-끝나면 `lastPlan = null`, `markStale()`. 실행취소는 `undo.ts`가 저널에서 기록을 찾아 `undoMoves`로
-ok 였던 이동을 역순으로 되돌린 뒤 `createdFolders` 중 빈 것을 `rmdir`(비재귀)로 치우고 `undoneAt`을
-찍는다(한 번만). 비어 있지 않은 폴더는 `keptFolders`로 돌려주고 남긴다 — 저널에도 같이 적는다.
-화면은 `createdFolders - removedFolders`로 계산하지 않는다(사용자가 이미 지운 폴더는 어느 쪽도 아니다).
-저널은 디스크의 JSON이라 읽을 때 원소 모양까지 검사하고(`journal.ts` `isEntry`), `undoMoves`는
-기록의 경로가 `root\name → root\폴더\name` 꼴인지 다시 본 뒤에만 `rename`한다.
-
-저널의 `saveEntry`는 **저장하려는 항목을 무조건 남기고** 나머지만 `JOURNAL_LIMIT`에 맞춰 자른다.
-시각으로 정렬한 뒤 자르면 시계가 뒤로 간 뒤에 방금 실행한 기록이 잘려 "기록 없는 실행"이 된다.
-옮긴 뒤 마지막 저장이 실패하면 `ExecuteOutcome.journalError`로 화면에 알린다(저널이 뒤처져 실행취소가
-마지막 항목을 놓칠 수 있다).
-renderer 는 `usePlan.execute` → `ExecuteDialog`(확인 → 진행 → 결과) → `scan.invalidate()` 순서로
-움직이고, 대시보드의 `RecentRunCard`가 저널을 보여주며 실행취소 버튼을 준다.
-
-**계획은 목적지를 폴더 이름으로만 말한다.** `PlanItem.toFolder`는 root 바로 아래 폴더의 이름이고
-경로가 아니다. renderer는 경로를 한 번도 조립하지 않으며, 실제 경로는 실행 단계에서 main이
-`join(root, toFolder, item.name)`으로 만든다. 폴더 이름 규칙(`sanitizeFolderName`, `folderKey`)은
-`src/shared/folderName.ts` 한 곳에 있어 AI 응답 검증과 사용자가 직접 만든 폴더가 같은 검사를 받는다.
-
-**계획 화면은 칸반 보드다.** 폴더 = 열, 항목 = 카드. 카드가 있는 열이 곧 결정이라 승인 체크박스는
-없다(`그대로 두기` 열 = 옮기지 않음). 판 편집 규칙은 `renderer/src/lib/planEdit.ts`의 순수 함수에
-모여 있고 `tests/planEdit.test.ts`가 검증한다. 드래그는 네이티브 HTML5 DnD(의존성 없음).
-판도 main과 같은 규칙을 지킨다 — **목적지로 쓰이는 폴더는 옮기지 않는다.** 열과 같은 이름의 폴더
-카드는 그 열 자체라 옮길 수 없고(`isDestinationDir`, 카드에 '정리 폴더' 배지), 이미 다른 열로 보낸
-폴더 카드의 이름으로는 열을 만들 수 없다. 열 이름은 `skipped`에 간 이름과도 대조한다(폴더면
-'기존 폴더', 파일·링크면 거부 — 실행 단계의 `mkdir`이 `EEXIST`로 터지지 않게).
-
-**서비스는 `electron`을 import 하지 않는다.** 그래야 Vitest에서 그대로 돌고 나중에
-`worker_threads`로 옮길 수 있다. `store.ts`만 예외다(`app.getPath`). 앱 경로 같은 값은 import가
-아니라 인자로 받는다. I/O가 필요한 로직은 `findDuplicates(entries, hashHead)`처럼 함수를 주입받는다.
-
-**PowerShell** — 드라이브 목록과 설치된 앱은 Node API로 얻을 수 없어 `lib/powershell.ts`가
-`powershell.exe`를 부른다. 전부 조회 전용이고, 실패하면 예외 대신 `null`을 돌려준다(카드 하나가
-비는 게 앱이 죽는 것보다 낫다). `drives.ts`는 PowerShell이 막힌 환경을 위해 `fs.statfs` 대비책을
-가지고 있다. `ConvertTo-Json`은 항목이 하나면 배열이 아닌 객체를 내므로 `toArray()`로 받는다.
-
-**윈도우 경로** — 문자열로 조립하지 말고 `node:path`의 `join`/`sep`을 쓴다. 드라이브 루트는
-`'C:'`가 아니라 `` `C:${sep}` ``이다 (`'C:'`만 쓰면 드라이브 기준 상대 경로가 된다). PowerShell
-스크립트의 레지스트리 경로처럼 백슬래시 리터럴이 필요하면 `String.raw`를 쓴다.
-
-**경로 별칭(`@shared`, `@`)은 세 곳에 각각 적혀 있다** — `tsconfig.json`, `electron.vite.config.ts`,
-`vitest.config.ts`. 별칭을 바꾸면 세 파일 모두 고쳐야 한다.
+층 구조·서비스 목록·흐름(스캔 → 정리 계획 → 실행 → 실행취소 → 중복 후보 → 휴지통)·IPC 채널 추가 절차(네 곳)·
+저널·PowerShell·윈도우 경로·경로 별칭은 **`architecture.md`**에 있다. 서비스나 채널을 추가하거나 흐름을 바꾸기
+전에 읽고, 바꾼 뒤에는 그 문서도 같이 고친다.
 
 ## ESLint가 강제하는 것
 

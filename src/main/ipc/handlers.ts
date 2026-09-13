@@ -6,6 +6,7 @@ import type { ExecuteRequest, Settings, TrashRequest } from '@shared/types'
 import { listApps } from '../services/apps'
 import { createStructuredCall } from '../lib/anthropic'
 import { NODE_HASH_IO } from '../lib/hash'
+import { lookupRecycleBinPolicy } from '../lib/recycleBin'
 import { buildTrashPlan, executeTrashApproved } from '../services/dedupe'
 import { listDrives } from '../services/drives'
 import type { ExecutorIo } from '../services/executor'
@@ -103,6 +104,7 @@ export function registerIpcHandlers(): void {
     executeTrashApproved(requests, {
       io: executorIo,
       hashIo: NODE_HASH_IO,
+      recycleBin: lookupRecycleBinPolicy,
       journalPath: journalPath(),
       onProgress: (progress) => {
         if (!event.sender.isDestroyed()) event.sender.send(CH.trashExecuteProgress, progress)

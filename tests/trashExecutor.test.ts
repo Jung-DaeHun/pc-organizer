@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import type { TrashGroup, TrashItem, TrashPlan, TrashProgress, TrashResult } from '@shared/types'
 import type { HashHandle, HashIo, HashStat } from '../src/main/lib/hash'
+import type { RecycleBinLookup, RecycleBinPolicy } from '../src/main/lib/recycleBin'
 import {
   executeTrash,
   preflightTrash,
@@ -15,8 +16,8 @@ import {
  * 휴지통 실행기(executor.ts 의 resolveTrash · preflightTrash · executeTrash)를 가짜 io 로 본다.
  *
  * 확인하는 것: 요청은 계획과 대조해 하나라도 어긋나면 전체 거부, 사전 점검은 아무것도 보내지 않고
- * 하나라도 걸리면 전부 돌려주며, 보내는 건 남길 파일을 뺀 나머지뿐이고 보내기 직전에 남길 파일이
- * 아직 있는지 다시 본다.
+ * 하나라도 걸리면 전부 돌려주며(휴지통 설정 → lstat → 전체 해시 순서, 앞 단계에서 걸리면 파일을 읽지 않는다),
+ * 보내는 건 남길 파일을 뺀 나머지뿐이고 보내기 직전에 남길 파일이 아직 있는지 다시 본다.
  */
 
 // ---------------------------------------------------------------- 가짜 파일시스템
@@ -151,6 +152,26 @@ const allJobs = (): TrashJob[] =>
 const codes = (results: TrashResult[]): Record<string, string | undefined> =>
   Object.fromEntries(results.map((r) => [r.path, r.code]))
 
+/** 넉넉한 휴지통 — 대부분의 테스트는 휴지통 설정이 걸림돌이 아니어야 한다 */
+const ROOMY: RecycleBinPolicy = { maxFileBytes: 1024 * 1024 * 1024, bypassed: false }
+
+/** 볼륨 루트마다 정한 설정을 돌려주고, 무엇을 몇 번 물었는지 남긴다 */
+function recycleBin(byRoot: Record<string, RecycleBinPolicy | null> = { 'C:\\': ROOMY }): {
+  lookup: RecycleBinLookup
+  asked: string[]
+} {
+  const asked: string[] = []
+  const lookup: RecycleBinLookup = async (root) => {
+    asked.push(root)
+    return byRoot[root] ?? null
+  }
+  return { lookup, asked }
+}
+
+/** 기본 계획 전체를 넉넉한 휴지통 설정으로 사전 점검 */
+const preflight = (d: FakeDisk): Promise<TrashResult[]> =>
+  preflightTrash(allJobs(), d.hashIo, recycleBin().lookup)
+
 // ---------------------------------------------------------------- resolveTrash
 
 describe('resolveTrash', () => {
@@ -211,7 +232,7 @@ describe('resolveTrash', () => {
 describe('preflightTrash', () => {
   it('전부 같으면 문제 없음. 남길 파일까지 전부 읽는다', async () => {
     const d = disk()
-    expect(await preflightTrash(allJobs(), d.hashIo)).toEqual([])
+    expect(await preflight(d)).toEqual([])
     expect(d.opened.sort()).toEqual(
       ['C:\\a\\x.pdf', 'C:\\b\\x.pdf', 'C:\\c\\x.pdf', 'C:\\big1.bin', 'C:\\big2.bin'].sort()
     )
@@ -221,40 +242,40 @@ describe('preflightTrash', () => {
   it('파일이 없으면 missing — 아무것도 읽지 않는다', async () => {
     const d = disk()
     d.files.delete('C:\\b\\x.pdf')
-    const problems = await preflightTrash(allJobs(), d.hashIo)
+    const problems = await preflight(d)
     expect(codes(problems)).toEqual({ 'C:\\b\\x.pdf': 'missing' })
     expect(d.opened).toEqual([])
   })
 
   it('남길 파일이 링크가 됐으면 not-file', async () => {
     const d = disk({ 'C:\\a\\x.pdf': { content: Buffer.from(SAME), link: true } })
-    expect(codes(await preflightTrash(allJobs(), d.hashIo))).toEqual({ 'C:\\a\\x.pdf': 'not-file' })
+    expect(codes(await preflight(d))).toEqual({ 'C:\\a\\x.pdf': 'not-file' })
     expect(d.opened).toEqual([])
   })
 
   it('크기가 바뀌었으면 size-changed', async () => {
     const d = disk({ 'C:\\c\\x.pdf': `${SAME}!` })
-    expect(codes(await preflightTrash(allJobs(), d.hashIo))).toEqual({ 'C:\\c\\x.pdf': 'size-changed' })
+    expect(codes(await preflight(d))).toEqual({ 'C:\\c\\x.pdf': 'size-changed' })
     expect(d.opened).toEqual([])
   })
 
   it('클라우드 전용이면 cloud-only — 열지 않는다', async () => {
     // 스캔 뒤 OneDrive 가 내려놓았을 수 있다. 여기서 열면 내려받기가 시작된다
     const d = disk({ 'C:\\big2.bin': { content: Buffer.from(BIG_A), cloudOnly: true } })
-    expect(codes(await preflightTrash(allJobs(), d.hashIo))).toEqual({ 'C:\\big2.bin': 'cloud-only' })
+    expect(codes(await preflight(d))).toEqual({ 'C:\\big2.bin': 'cloud-only' })
     expect(d.opened).toEqual([])
   })
 
   it('앞 4KB 는 같고 뒤가 다르면 hash-mismatch — 후보가 여기서 걸러진다', async () => {
     const d = disk({ 'C:\\big1.bin': BIG_B })
     // 그룹 1 은 big2 를 남긴다(keepId 1.1). 남길 파일 기준으로 big1 이 다르다고 나온다
-    expect(codes(await preflightTrash(allJobs(), d.hashIo))).toEqual({ 'C:\\big1.bin': 'hash-mismatch' })
+    expect(codes(await preflight(d))).toEqual({ 'C:\\big1.bin': 'hash-mismatch' })
   })
 
   it('여러 문제를 한 번에 돌려준다', async () => {
     const d = disk({ 'C:\\b\\x.pdf': OTHER })
     d.files.delete('C:\\big1.bin')
-    const problems = await preflightTrash(allJobs(), d.hashIo)
+    const problems = await preflight(d)
     // 1단계(lstat)에서 걸리면 해시 단계로 가지 않는다 — missing 만 나온다
     expect(codes(problems)).toEqual({ 'C:\\big1.bin': 'missing' })
     expect(d.opened).toEqual([])
@@ -263,7 +284,7 @@ describe('preflightTrash', () => {
   it('해시 진행률은 바이트 기준으로 전체 크기까지 간다', async () => {
     const d = disk()
     const seen: TrashProgress[] = []
-    await preflightTrash(allJobs(), d.hashIo, (p) => seen.push(p))
+    await preflightTrash(allJobs(), d.hashIo, recycleBin().lookup, (p) => seen.push(p))
     const total = SAME.length * 3 + BIG_A.length * 2
     expect(seen.every((p) => p.phase === 'verifying' && p.total === total)).toBe(true)
     expect(seen.at(-1)).toEqual({ phase: 'verifying', done: total, total, current: '' })
@@ -273,7 +294,71 @@ describe('preflightTrash', () => {
     // 같은 내용이면 실제 sha256 도 같다 — 가짜 핸들이 내용을 그대로 내주는지 겸사겸사 본다
     expect(sha256(SAME)).toBe(sha256(SAME))
     const d = disk({ 'C:\\c\\x.pdf': OTHER })
-    expect(codes(await preflightTrash(allJobs(), d.hashIo))).toEqual({ 'C:\\c\\x.pdf': 'hash-mismatch' })
+    expect(codes(await preflight(d))).toEqual({ 'C:\\c\\x.pdf': 'hash-mismatch' })
+  })
+
+  // shell.trashItem 은 휴지통 최대 크기보다 큰 파일을 오류 없이 영구 삭제한다 (lib/recycleBin.ts 의 실측).
+  // 그래서 휴지통 설정 검사는 파일을 읽기 전에 가장 먼저 돌고, 걸리면 lstat 도 해시도 하지 않는다
+  describe('휴지통 설정', () => {
+    it('보낼 파일의 볼륨마다 한 번만 묻는다', async () => {
+      const d = disk()
+      const rb = recycleBin()
+      expect(await preflightTrash(allJobs(), d.hashIo, rb.lookup)).toEqual([])
+      expect(rb.asked).toEqual(['C:\\'])
+    })
+
+    it('휴지통 최대 크기 이상인 파일은 exceeds-recycle-bin — 파일을 열지 않는다', async () => {
+      const d = disk()
+      // 그룹 1(BIG_A)만 한도에 걸린다. 같은 크기는 안전하지 않다고 본다(>=)
+      const rb = recycleBin({ 'C:\\': { maxFileBytes: BIG_A.length, bypassed: false } })
+      const problems = await preflightTrash(allJobs(), d.hashIo, rb.lookup)
+      expect(codes(problems)).toEqual({ 'C:\\big1.bin': 'exceeds-recycle-bin' })
+      expect(d.opened).toEqual([])
+      expect(d.trashed).toEqual([])
+    })
+
+    it('한도보다 1바이트 작으면 통과한다', async () => {
+      const d = disk()
+      const rb = recycleBin({ 'C:\\': { maxFileBytes: BIG_A.length + 1, bypassed: false } })
+      expect(await preflightTrash(allJobs(), d.hashIo, rb.lookup)).toEqual([])
+    })
+
+    it("'휴지통을 쓰지 않음' 볼륨이면 recycle-bin-off — 크기와 무관하게 전부", async () => {
+      const d = disk()
+      const rb = recycleBin({ 'C:\\': { maxFileBytes: ROOMY.maxFileBytes, bypassed: true } })
+      expect(codes(await preflightTrash(allJobs(), d.hashIo, rb.lookup))).toEqual({
+        'C:\\b\\x.pdf': 'recycle-bin-off',
+        'C:\\c\\x.pdf': 'recycle-bin-off',
+        'C:\\big1.bin': 'recycle-bin-off'
+      })
+      expect(d.opened).toEqual([])
+    })
+
+    it('설정을 모르면(조회 실패·드라이브 문자 없음) recycle-bin-unknown — 모르면 보내지 않는다', async () => {
+      const d = disk()
+      const rb = recycleBin({})
+      expect(codes(await preflightTrash(allJobs(), d.hashIo, rb.lookup))).toEqual({
+        'C:\\b\\x.pdf': 'recycle-bin-unknown',
+        'C:\\c\\x.pdf': 'recycle-bin-unknown',
+        'C:\\big1.bin': 'recycle-bin-unknown'
+      })
+      expect(d.opened).toEqual([])
+    })
+
+    it('볼륨마다 따로 본다 — 걸린 볼륨의 파일만 그 이유로 막힌다', async () => {
+      const twoVolumes: TrashPlan = {
+        ...plan,
+        groups: [group('0', SAME.length, ['C:\\a\\x.pdf', 'C:\\b\\x.pdf', 'D:\\x.pdf'])]
+      }
+      const d = disk({ 'D:\\x.pdf': SAME })
+      const rb = recycleBin({ 'C:\\': ROOMY, 'D:\\': { maxFileBytes: 10, bypassed: false } })
+      const jobs = resolveTrash(twoVolumes, [{ groupId: '0', keepId: '0.0' }])
+      expect(codes(await preflightTrash(jobs, d.hashIo, rb.lookup))).toEqual({
+        'D:\\x.pdf': 'exceeds-recycle-bin'
+      })
+      expect(rb.asked.sort()).toEqual(['C:\\', 'D:\\'])
+      expect(d.opened).toEqual([])
+    })
   })
 })
 

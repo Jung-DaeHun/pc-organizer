@@ -133,6 +133,8 @@ export function TrashDialog({
               <span>
                 보내기 전에 각 그룹의 파일 전체를 다시 비교합니다. 하나라도 다르거나 사라졌으면 <b>아무것도
                 보내지 않습니다</b>. 영구 삭제가 아니라 윈도우 휴지통으로 가며, 거기서 복원할 수 있습니다.
+                드라이브의 휴지통 최대 크기보다 큰 파일은 윈도우가 휴지통을 거치지 않고 지우므로, 그런 파일이
+                있으면 역시 보내지 않습니다.
               </span>
             </p>
             {error && <p className="text-destructive">{error}</p>}
@@ -214,7 +216,8 @@ export function TrashDialog({
               <b>
                 {formatCount(ok.length)}개 · {formatBytes(bytes)}
               </b>
-              을(를) 휴지통으로 보냈습니다. {formatCount(entry.keptPaths.length)}개는 남겼습니다.
+              을(를) 휴지통으로 보냈습니다.
+              {entry.keptPaths.length > 0 && ` 보낸 그룹마다 하나씩, ${formatCount(entry.keptPaths.length)}개는 남겼습니다.`}
               {failed.length > 0 && (
                 <span className="text-destructive"> {formatCount(failed.length)}개는 보내지 못했습니다.</span>
               )}
