@@ -15,7 +15,8 @@ npm run lint                             # ESLint (아키텍처 규칙이 여기
 npm run typecheck                        # tsc --noEmit
 npm test                                 # Vitest 1회 실행
 npm run build                            # typecheck + electron-vite build
-npm run package                          # 설치 파일 생성 (release/)
+npm run package                          # 설치 파일 생성 (release/pc-organizer-setup-<버전>.exe, NSIS)
+npm run package:dir                      # 설치 파일 없이 압축 안 한 폴더만 (release/win-unpacked/ — 스모크 테스트용)
 
 npx vitest run tests/scanner.test.ts     # 파일 하나만
 npx vitest run -t "클라우드 전용"          # 이름으로 고르기

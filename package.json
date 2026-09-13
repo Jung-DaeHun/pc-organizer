@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "package": "npm run build && electron-builder --win --dir",
+    "package": "npm run build && electron-builder --win",
+    "package:dir": "npm run build && electron-builder --win --dir",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "verify": "npm run lint && npm run typecheck && npm test && electron-vite build"

@@ -50,8 +50,12 @@ npm test           # 테스트
 npm run typecheck  # 타입 검사
 npm run build      # 타입 검사 + 번들
 npm run verify     # 위 네 가지를 한 번에 (커밋 전 검사와 같은 내용)
-npm run package    # 설치 파일 생성 (release/)
+npm run package    # 설치 파일 생성 (release/pc-organizer-setup-<버전>.exe)
 ```
+
+설치 파일은 NSIS(설치 폴더 선택 가능, 현재 사용자 전용, 관리자 권한 없음)이고 **코드 서명이 없다** — 다른 PC 에서는
+SmartScreen 이나 스마트 앱 컨트롤이 막을 수 있다. 설치본과 `npm run dev` 는 같은 `%APPDATA%\pc-organizer` 를 쓴다
+(설정·API 키·저널이 공유된다).
 
 Windows 전용이다. 드라이브 용량·설치된 앱 목록·드라이브별 휴지통 한도를 Windows에 기본 탑재된
 PowerShell로 조회한다. 전부 조회뿐이고 레지스트리에 쓰는 코드는 없다.
