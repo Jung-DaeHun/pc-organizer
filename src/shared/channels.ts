@@ -41,9 +41,12 @@ export const CH = {
 
   /**
    * 중복 후보 → 휴지통 (B3). build 는 조회 전용 — 스캔이 계산해 둔 그룹을 계획 모양으로 바꿀 뿐
-   * 파일을 읽지도 건드리지도 않는다
+   * 파일을 읽지도 건드리지도 않는다. execute 가 이 앱에서 사용자 파일을 휴지통으로 보내는 유일한 채널이다
+   * (영구 삭제 아님). 전체 해시로 다시 비교한 뒤에만 보내고, 저널에 남긴다. progress 는 main -> renderer
    */
   trashBuild: 'trash:build',
+  trashExecute: 'trash:execute',
+  trashExecuteProgress: 'trash:execute-progress',
 
   /** API 키. 키 값이 renderer 로 돌아오는 채널은 없다 */
   secretsSetApiKey: 'secrets:set-api-key',

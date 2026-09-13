@@ -1,12 +1,12 @@
 import { useEffect, useState, type JSX } from 'react'
-import { History, Loader2, Undo2 } from 'lucide-react'
-import type { UndoEntry } from '@shared/types'
+import { History, Loader2, Trash2, Undo2 } from 'lucide-react'
+import type { TrashEntry, UndoEntry } from '@shared/types'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useUndo } from '@/hooks/useUndo'
-import { formatCount, formatDate, truncatePath } from '@/lib/format'
+import { formatBytes, formatCount, formatDate, truncatePath } from '@/lib/format'
 
 interface RecentRunCardProps {
   /** 스캔 중이면 되돌리지 못한다 (main 도 거부한다 — 여기서는 버튼을 막아 이유를 보여준다) */
@@ -27,6 +27,16 @@ function summary(entry: UndoEntry): string {
   return parts.join(' · ')
 }
 
+function trashSummary(entry: TrashEntry): string {
+  const ok = entry.results.filter((r) => r.ok)
+  const failed = entry.results.length - ok.length
+  const bytes = ok.reduce((n, r) => n + r.size, 0)
+  const parts = [`${formatCount(ok.length)}개 휴지통으로 (${formatBytes(bytes)})`]
+  if (failed > 0) parts.push(`${formatCount(failed)}개 실패`)
+  parts.push(`${formatCount(entry.keptPaths.length)}개 남김`)
+  return parts.join(' · ')
+}
+
 function undoSummary(entry: UndoEntry): string {
   const results = entry.undoResults ?? []
   const ok = results.filter((r) => r.ok).length
@@ -44,6 +54,7 @@ function undoSummary(entry: UndoEntry): string {
 /**
  * 실행 기록과 실행취소. 앱을 다시 켠 뒤에도 되돌릴 수 있게 대시보드에 둔다.
  * 기록은 main 의 journal.json 이 진실이고, 여기서는 최근 몇 개만 보여준다.
+ * 휴지통 기록은 되돌리기 버튼 대신 "윈도우 휴지통에서 복원" 안내만 한다 — 앱이 휴지통에서 꺼내는 코드는 없다.
  */
 export function RecentRunCard({ scanning, onFilesMoved }: RecentRunCardProps): JSX.Element {
   const { entries, busy, error, refresh, undo } = useUndo()
@@ -76,7 +87,8 @@ export function RecentRunCard({ scanning, onFilesMoved }: RecentRunCardProps): J
             최근 실행
           </CardTitle>
           <CardDescription>
-            옮긴 기록. 되돌리면 원래 자리로 돌아가고, 그때 만든 폴더는 비어 있으면 함께 지웁니다
+            옮긴 기록은 되돌리면 원래 자리로 돌아가고, 그때 만든 폴더는 비어 있으면 함께 지웁니다.
+            휴지통으로 보낸 것은 윈도우 휴지통에서 복원합니다
           </CardDescription>
         </div>
       </CardHeader>
@@ -88,6 +100,25 @@ export function RecentRunCard({ scanning, onFilesMoved }: RecentRunCardProps): J
         ) : (
           <ul className="flex flex-col gap-2">
             {shown.map((entry) => {
+              if (entry.kind === 'trash') {
+                return (
+                  <li key={entry.id} className="flex items-center gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline gap-2">
+                        <span className="font-medium">{formatDate(entry.executedAt)}</span>
+                        <span className="text-muted-foreground flex items-center gap-1">
+                          <Trash2 className="size-3" />
+                          중복 후보 정리
+                        </span>
+                      </div>
+                      <div className="text-muted-foreground">{trashSummary(entry)}</div>
+                    </div>
+                    <span className="text-muted-foreground shrink-0 text-[11px]">
+                      윈도우 휴지통에서 복원
+                    </span>
+                  </li>
+                )
+              }
               const movedOk = entry.results.some((r) => r.ok)
               return (
                 <li key={entry.id} className="flex items-center gap-3">

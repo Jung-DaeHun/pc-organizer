@@ -1,4 +1,4 @@
-import type { UndoEntry, UndoOutcome } from '@shared/types'
+import type { JournalEntry, UndoEntry, UndoOutcome } from '@shared/types'
 import { beginActivity } from './activity'
 import { undoMoves, type ExecutorIo } from './executor'
 import { findEntry, readJournal, saveEntry } from './journal'
@@ -10,8 +10,8 @@ import { markStale } from './scan'
  * 쓰기 I/O 는 실행과 같은 ExecutorIo 를 주입받는다 — 되돌리기도 rename 일 뿐이다.
  */
 
-/** 최근 것이 앞. 화면의 '최근 실행' 카드가 보여준다 */
-export function listUndoEntries(journalPath: string): Promise<UndoEntry[]> {
+/** 최근 것이 앞. 이동·휴지통 기록이 섞여 있다. 화면의 '최근 실행' 카드가 보여준다 */
+export function listUndoEntries(journalPath: string): Promise<JournalEntry[]> {
   return readJournal(journalPath)
 }
 
@@ -31,6 +31,8 @@ export async function undoExecution(
   try {
     const entry = await findEntry(journalPath, id)
     if (!entry) throw new Error('그런 실행 기록이 없습니다')
+    // 휴지통 기록은 되돌리지 않는다 — 앱이 휴지통에서 꺼내는 코드는 없고, 윈도우 휴지통에서 복원한다
+    if (entry.kind === 'trash') throw new Error('휴지통으로 보낸 것은 윈도우 휴지통에서 복원하세요')
     if (entry.undoneAt) throw new Error('이미 되돌린 기록입니다')
 
     started = true

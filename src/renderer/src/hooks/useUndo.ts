@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { UndoEntry, UndoOutcome } from '@shared/types'
+import type { JournalEntry, UndoOutcome } from '@shared/types'
 import { errorMessage } from '@/lib/format'
 
 export interface UndoState {
-  /** 최근 것이 앞. 아직 안 읽었으면 null */
-  entries: UndoEntry[] | null
+  /** 최근 것이 앞. 이동·휴지통 기록이 섞여 있다. 아직 안 읽었으면 null */
+  entries: JournalEntry[] | null
   busy: boolean
   error: string | null
   refresh: () => Promise<void>
@@ -17,7 +17,7 @@ export interface UndoState {
  * 대시보드의 '최근 실행' 카드와 계획 화면의 결과 다이얼로그가 같이 쓴다.
  */
 export function useUndo(): UndoState {
-  const [entries, setEntries] = useState<UndoEntry[] | null>(null)
+  const [entries, setEntries] = useState<JournalEntry[] | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 

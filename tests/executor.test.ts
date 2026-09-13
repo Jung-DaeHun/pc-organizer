@@ -127,6 +127,12 @@ class FakeFs implements ExecutorIo {
     }
     this.entries.delete(key)
   }
+
+  /** 이동·실행취소는 휴지통을 부르면 안 된다. 불리면 그 자체가 결함이라 던진다 */
+  async trashItem(path: string): Promise<void> {
+    this.log.push(`trashItem ${path}`)
+    throw new Error('이동 실행이 trashItem 을 불렀습니다')
+  }
 }
 
 function rootFs(extra: Record<string, Kind> = {}): FakeFs {

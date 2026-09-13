@@ -1,11 +1,12 @@
 import { lstat, mkdir, rename, rmdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { CH } from '@shared/channels'
-import type { ExecuteRequest, Settings } from '@shared/types'
+import type { ExecuteRequest, Settings, TrashRequest } from '@shared/types'
 import { listApps } from '../services/apps'
 import { createStructuredCall } from '../lib/anthropic'
-import { buildTrashPlan } from '../services/dedupe'
+import { NODE_HASH_IO } from '../lib/hash'
+import { buildTrashPlan, executeTrashApproved } from '../services/dedupe'
 import { listDrives } from '../services/drives'
 import type { ExecutorIo } from '../services/executor'
 import { advise, buildPlan, executeApproved, previewPlanAdvice } from '../services/plan'
@@ -22,8 +23,9 @@ import { listUndoEntries, undoExecution } from '../services/undo'
 
 /**
  * 사용자 파일에 쓰는 호출은 **이 객체 하나로 모인다.** 서비스(executor.ts)는 이걸 주입받아 쓰고
- * fs 를 직접 부르지 않는다. 사용자 파일을 지우는 호출(unlink·rm)은 없다 — 폴더 생성은 mkdir, 이동은
- * rename, 그리고 실행취소가 자기가 만든 **빈** 폴더를 치우는 rmdir 뿐이다.
+ * fs 를 직접 부르지 않는다. 영구 삭제 호출(unlink·rm)은 없다 — 폴더 생성은 mkdir, 이동은 rename,
+ * 실행취소가 자기가 만든 **빈** 폴더를 치우는 rmdir, 그리고 중복 후보의 나머지 사본을 **윈도우 휴지통**으로
+ * 보내는 shell.trashItem(사용자가 복원할 수 있다)뿐이다.
  * mkdir 은 recursive 없이 한 단계만 만들고(폴더 이름은 검증을 거쳐 구분자가 없다), rmdir 은 옵션 없이
  * 불러 비어 있지 않으면 ENOTEMPTY 로 실패한다 — recursive 를 붙이는 순간 사용자 파일이 지워질 수 있다.
  */
@@ -31,7 +33,8 @@ const executorIo: ExecutorIo = {
   lstat,
   mkdir: (path) => mkdir(path),
   rename,
-  rmdir: (path) => rmdir(path)
+  rmdir: (path) => rmdir(path),
+  trashItem: (path) => shell.trashItem(path)
 }
 
 /** 실행 기록. settings.json·secrets.json 과 같은 userData 아래 */
@@ -94,8 +97,18 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(CH.undoList, () => listUndoEntries(journalPath()))
   ipcMain.handle(CH.undoRun, (_event, id: string) => undoExecution(id, executorIo, journalPath()))
 
-  // 중복 후보 → 휴지통. build 는 조회 전용
+  // 중복 후보 → 휴지통. build 는 조회 전용, execute 가 휴지통 쓰기(trashItem)가 실체화되는 유일한 곳
   ipcMain.handle(CH.trashBuild, (_event, scannedAt: number) => buildTrashPlan(scannedAt))
+  ipcMain.handle(CH.trashExecute, (event, requests: TrashRequest[]) =>
+    executeTrashApproved(requests, {
+      io: executorIo,
+      hashIo: NODE_HASH_IO,
+      journalPath: journalPath(),
+      onProgress: (progress) => {
+        if (!event.sender.isDestroyed()) event.sender.send(CH.trashExecuteProgress, progress)
+      }
+    })
+  )
 
   ipcMain.handle(CH.secretsSetApiKey, (_event, key: string) => setApiKey(key))
   ipcMain.handle(CH.secretsHasApiKey, () => hasApiKey())

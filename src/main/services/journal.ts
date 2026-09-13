@@ -1,9 +1,11 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import type { ExecutionResult, UndoEntry } from '@shared/types'
+import type { ExecutionResult, JournalEntry, TrashEntry, TrashResult, UndoEntry } from '@shared/types'
 
 /**
- * 실행 기록(저널). 실행취소가 이걸 읽어 되돌린다.
+ * 실행 기록(저널). 이동 기록은 실행취소가 이걸 읽어 되돌리고, 휴지통 기록은 화면이 "무엇을 보냈나"를
+ * 보여준다(되돌리기는 윈도우 휴지통에서). 두 종류가 한 파일에 `kind` 로 구분돼 시간순으로 섞여 있다 —
+ * kind 가 없으면 휴지통 기록이 생기기 전의 이동 기록이다.
  *
  * 쓰는 곳은 **userData 아래 journal.json 하나**뿐이다 — 사용자 파일이 아니다. 경로는 인자로 받아
  * electron 을 import 하지 않는다(테스트는 임시 디렉터리를 넘긴다).
@@ -37,10 +39,23 @@ function isResult(value: unknown): value is ExecutionResult {
 
 const isResultArray = (v: unknown): v is ExecutionResult[] => Array.isArray(v) && v.every(isResult)
 
-function isEntry(value: unknown): value is UndoEntry {
+function isTrashResult(value: unknown): value is TrashResult {
   if (typeof value !== 'object' || value === null) return false
   const v = value as Record<string, unknown>
   return (
+    typeof v.id === 'string' &&
+    typeof v.name === 'string' &&
+    typeof v.path === 'string' &&
+    typeof v.size === 'number' &&
+    typeof v.ok === 'boolean'
+  )
+}
+
+function isMoveEntry(value: unknown): value is UndoEntry {
+  if (typeof value !== 'object' || value === null) return false
+  const v = value as Record<string, unknown>
+  return (
+    (v.kind === undefined || v.kind === 'move') &&
     typeof v.id === 'string' &&
     typeof v.executedAt === 'number' &&
     typeof v.root === 'string' &&
@@ -53,8 +68,23 @@ function isEntry(value: unknown): value is UndoEntry {
   )
 }
 
+function isTrashEntry(value: unknown): value is TrashEntry {
+  if (typeof value !== 'object' || value === null) return false
+  const v = value as Record<string, unknown>
+  return (
+    v.kind === 'trash' &&
+    typeof v.id === 'string' &&
+    typeof v.executedAt === 'number' &&
+    Array.isArray(v.results) &&
+    v.results.every(isTrashResult) &&
+    isStringArray(v.keptPaths)
+  )
+}
+
+const isEntry = (value: unknown): value is JournalEntry => isMoveEntry(value) || isTrashEntry(value)
+
 /** 최근 것이 앞. 파일이 없거나 깨졌으면 빈 목록 (모양이 틀린 항목은 버린다) */
-export async function readJournal(path: string): Promise<UndoEntry[]> {
+export async function readJournal(path: string): Promise<JournalEntry[]> {
   let parsed: unknown
   try {
     parsed = JSON.parse(await readFile(path, 'utf8'))
@@ -65,7 +95,7 @@ export async function readJournal(path: string): Promise<UndoEntry[]> {
   return parsed.filter(isEntry).sort((a, b) => b.executedAt - a.executedAt)
 }
 
-async function writeJournal(path: string, entries: readonly UndoEntry[]): Promise<void> {
+async function writeJournal(path: string, entries: readonly JournalEntry[]): Promise<void> {
   await mkdir(dirname(path), { recursive: true })
   const tmp = `${path}.tmp`
   await writeFile(tmp, JSON.stringify(entries, null, 2), 'utf8')
@@ -81,11 +111,11 @@ async function writeJournal(path: string, entries: readonly UndoEntry[]): Promis
  * executedAt 이 더 미래일 때 방금 실행한 기록이 잘려 나간다. 그러면 예외 없이 "기록이 없는 실행"이
  * 되어 실행취소 길이 사라진다. readJournal 이 최근 것을 앞으로 정렬해 주므로 나머지만 자른다.
  */
-export async function saveEntry(path: string, entry: UndoEntry): Promise<void> {
+export async function saveEntry(path: string, entry: JournalEntry): Promise<void> {
   const others = (await readJournal(path)).filter((e) => e.id !== entry.id)
   await writeJournal(path, [entry, ...others.slice(0, JOURNAL_LIMIT - 1)])
 }
 
-export async function findEntry(path: string, id: string): Promise<UndoEntry | null> {
+export async function findEntry(path: string, id: string): Promise<JournalEntry | null> {
   return (await readJournal(path)).find((e) => e.id === id) ?? null
 }

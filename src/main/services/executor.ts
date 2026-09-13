@@ -1,6 +1,7 @@
 import { basename, dirname, join } from 'node:path'
 import {
   EXEC_ERROR_LABELS,
+  TRASH_ERROR_LABELS,
   type ExecErrorCode,
   type ExecuteProgress,
   type ExecuteRequest,
@@ -8,23 +9,35 @@ import {
   type ItemKind,
   type OrganizePlan,
   type SkipReason,
+  type TrashErrorCode,
+  type TrashGroup,
+  type TrashItem,
+  type TrashPlan,
+  type TrashProgress,
+  type TrashRequest,
+  type TrashResult,
   type UndoEntry
 } from '@shared/types'
 import { folderKey, sanitizeFolderName } from '@shared/folderName'
+import { isCloudOnly } from '../lib/cloudOnly'
+import { hashFull, type HashIo } from '../lib/hash'
 import { pathKey } from '../lib/paths'
 
 /**
- * 정리 계획을 실제로 옮기는 실행기. **이 앱에서 사용자 파일을 움직이는 유일한 로직**이다.
+ * 정리 계획을 실제로 옮기는 실행기. **이 앱에서 사용자 파일을 움직이거나 휴지통으로 보내는 유일한 로직**이다.
  *
  * 파일시스템은 ExecutorIo 로 주입받는다 — 이 파일은 fs 를 import 하지 않고, 실체는
- * ipc/handlers.ts 가 node:fs/promises 로 만든다. 그래서 Vitest 에서 가짜 io 로 전부 검증할 수 있고,
- * 쓰기 호출이 어디서 일어나는지 한눈에 보인다.
+ * ipc/handlers.ts 가 node:fs/promises 와 shell.trashItem 으로 만든다. 그래서 Vitest 에서 가짜 io 로 전부
+ * 검증할 수 있고, 쓰기 호출이 어디서 일어나는지 한눈에 보인다.
  *
- * 하는 일은 폴더 만들기(mkdir), 옮기기(rename), 그리고 실행취소가 **자기가 만든 빈 폴더**를 치우는 것
- * (rmdir, 비재귀)뿐이다. 사용자 파일을 지우는 호출(unlink·rm)은 없고, 복사하지 않고(다른 드라이브면 EXDEV 로
- * 실패), 이름을 바꾸지 않고(목적지 = join(root, 폴더, 원래 이름)), 덮어쓰지 않는다(목적지에 같은 이름이
- * 있으면 실패). 실행취소는 같은 rename 을 거꾸로 한 뒤, 만든 폴더가 비어 있으면 rmdir 한다 — 안에 무엇이든
- * 남아 있으면 ENOTEMPTY 로 실패해 그대로 둔다.
+ * 이동(B1·B2): 폴더 만들기(mkdir), 옮기기(rename), 실행취소가 **자기가 만든 빈 폴더**를 치우는 것(rmdir,
+ * 비재귀). 복사하지 않고(다른 드라이브면 EXDEV 로 실패), 이름을 바꾸지 않고(목적지 = join(root, 폴더, 원래
+ * 이름)), 덮어쓰지 않는다(목적지에 같은 이름이 있으면 실패). 실행취소는 같은 rename 을 거꾸로 한 뒤, 만든
+ * 폴더가 비어 있으면 rmdir 한다 — 안에 무엇이든 남아 있으면 ENOTEMPTY 로 실패해 그대로 둔다.
+ *
+ * 휴지통(B3): 중복 후보 그룹에서 **남길 하나를 뺀 나머지**를 trashItem 으로 윈도우 휴지통에 보낸다.
+ * 영구 삭제 호출(unlink·rm)은 없다. 보내기 전에 그룹의 모든 파일(남길 것 포함)을 lstat 하고 전체 해시로
+ * 비교해 하나라도 다르면 아무것도 보내지 않으며, 파일마다 보내기 직전에 남길 파일이 아직 있는지 다시 본다.
  */
 
 /** lstat 결과 중 실행기가 보는 것. node:fs 의 Stats 가 그대로 맞는다 */
@@ -42,9 +55,15 @@ export interface ExecutorIo {
   rename(from: string, to: string): Promise<void>
   /**
    * **비어 있는 디렉터리만** 지운다 (비재귀). 안에 무엇이든 있으면 ENOTEMPTY 로 실패해야 한다.
-   * 실행취소가 자기가 만든 폴더를 치울 때만 부른다 — 사용자 파일이 지워질 수 있는 경로는 이 인터페이스에 없다.
+   * 실행취소가 자기가 만든 폴더를 치울 때만 부른다.
    */
   rmdir(path: string): Promise<void>
+  /**
+   * 파일 하나를 윈도우 휴지통으로 보낸다 (shell.trashItem). 영구 삭제가 아니다 — 사용자가 휴지통에서
+   * 복원할 수 있다. executeTrash 만 부르고, 그 전에 전체 해시 비교(preflightTrash)를 통과해야 한다.
+   * 이 인터페이스에 영구 삭제(unlink·rm)는 없다.
+   */
+  trashItem(path: string): Promise<void>
 }
 
 /** 한 항목을 from 에서 to 로 옮기는 일. 실행도 되돌리기도 이 모양이다 */
@@ -298,6 +317,219 @@ export async function executeMoves(
 
   hooks.onProgress?.({ done: total, total, current: '' })
   return { results, createdFolders: [...created] }
+}
+
+// ---------------------------------------------------------------- 휴지통 (B3)
+
+/** 검증을 통과한 그룹 하나 — 남길 파일과 휴지통으로 보낼 파일들 */
+export interface TrashJob {
+  group: TrashGroup
+  keeper: TrashItem
+  targets: TrashItem[]
+}
+
+export interface TrashHooks {
+  onProgress?: (progress: TrashProgress) => void
+  /**
+   * 파일 하나를 보낼 때마다(성공이든 실패든). 저널이 여기서 기록을 남긴다.
+   * 이 훅이 예외를 던지면 **더 진행하지 않는다** — 기록을 남길 수 없는 삭제는 하지 않는다.
+   */
+  onResult?: (result: TrashResult) => Promise<void>
+}
+
+function trashFail(item: TrashItem, code: TrashErrorCode, detail?: string): TrashResult {
+  return {
+    id: item.id,
+    name: item.name,
+    path: item.path,
+    size: item.size,
+    ok: false,
+    code,
+    error: detail ? `${TRASH_ERROR_LABELS[code]} — ${detail}` : TRASH_ERROR_LABELS[code]
+  }
+}
+
+function trashSucceed(item: TrashItem): TrashResult {
+  return { id: item.id, name: item.name, path: item.path, size: item.size, ok: true }
+}
+
+/**
+ * renderer 가 돌려보낸 요청을 main 의 계획과 대조해 작업 목록으로 바꾼다.
+ *
+ * 요청은 그룹 id 와 **남길 파일** id 뿐이다(경로 없음). 남길 파일은 그 그룹의 것이어야 하고, 나머지가
+ * 휴지통 대상이 된다 — 그래서 그룹 전체를 지우는 요청은 만들 수 없다. 모르는 그룹, 그룹에 없는 남길 파일,
+ * 같은 그룹이 두 번, 그룹 안에 같은 경로가 둘(계획 자체가 이상한 것) — 하나라도 어긋나면 전체를
+ * 거부한다(예외). 요청이 어긋났다는 건 버그거나 조작이라, 일부만 보내는 것보다 아무것도 안 하는 게 낫다.
+ */
+export function resolveTrash(plan: TrashPlan, requests: readonly TrashRequest[]): TrashJob[] {
+  if (!Array.isArray(requests)) throw new Error('요청 형식이 잘못되었습니다')
+  if (requests.length === 0) throw new Error('보낼 항목이 없습니다')
+
+  const byId = new Map(plan.groups.map((g) => [g.id, g]))
+  const seen = new Set<string>()
+  const jobs: TrashJob[] = []
+
+  for (const request of requests) {
+    if (
+      typeof request !== 'object' ||
+      request === null ||
+      typeof request.groupId !== 'string' ||
+      typeof request.keepId !== 'string'
+    ) {
+      throw new Error('요청 형식이 잘못되었습니다')
+    }
+    if (seen.has(request.groupId)) {
+      throw new Error(`같은 그룹이 두 번 들어 있습니다 (id ${request.groupId})`)
+    }
+    seen.add(request.groupId)
+
+    const group = byId.get(request.groupId)
+    if (!group) throw new Error(`계획에 없는 그룹입니다 (id ${request.groupId})`)
+    if (group.items.length < 2) throw new Error(`혼자인 그룹은 보낼 것이 없습니다 (id ${group.id})`)
+
+    const keeper = group.items.find((it) => it.id === request.keepId)
+    if (!keeper) throw new Error(`남길 파일이 그룹에 없습니다 (id ${request.keepId})`)
+
+    const keys = new Set(group.items.map((it) => pathKey(it.path)))
+    if (keys.size !== group.items.length) {
+      throw new Error(`그룹 안에 같은 경로가 둘 있습니다 (id ${group.id})`)
+    }
+
+    const targets = group.items.filter((it) => it.id !== keeper.id)
+    jobs.push({ group, keeper, targets })
+  }
+
+  return jobs
+}
+
+/** 그룹의 파일 하나가 계획 당시 모양 그대로인지 (읽기 전용 lstat). 문제가 없으면 null */
+async function checkTrashItem(
+  item: TrashItem,
+  expectedSize: number,
+  hashIo: HashIo
+): Promise<TrashResult | null> {
+  let stat
+  try {
+    stat = await hashIo.lstat(item.path)
+  } catch (err) {
+    if (errorCode(err) === 'ENOENT') return trashFail(item, 'missing')
+    return trashFail(item, 'io', errorText(err))
+  }
+  if (stat.isSymbolicLink() || !stat.isFile()) return trashFail(item, 'not-file')
+  if (stat.size !== expectedSize) return trashFail(item, 'size-changed')
+  // 클라우드 전용 여부는 hashFull 이 열기 직전에 다시 본다. 여기서도 미리 걸러 큰 파일을 읽기 전에 멈춘다
+  if (isCloudOnly(stat)) return trashFail(item, 'cloud-only')
+  return null
+}
+
+/**
+ * 전부 점검만 한다 — **아무것도 보내지 않는다.** 걸린 것만 돌려준다 (비어 있으면 실행해도 된다).
+ *
+ * 1) 모든 그룹의 모든 파일(남길 것 포함)을 lstat — 있고, 일반 파일이고, 크기가 계획과 같고, 클라우드
+ *    전용이 아니다. 하나라도 걸리면 여기서 끝낸다(수 GB 를 읽기 전에 멈춘다)
+ * 2) 그룹마다 전체 해시 — 남길 파일과 나머지 전부가 같아야 한다. 앞 4KB 만 같았던 '후보'가 여기서 확정된다.
+ *    hashFull 은 열기 직전에 lstat 으로 클라우드 전용 여부를 다시 본다
+ */
+export async function preflightTrash(
+  jobs: readonly TrashJob[],
+  hashIo: HashIo,
+  onProgress?: (progress: TrashProgress) => void
+): Promise<TrashResult[]> {
+  const problems: TrashResult[] = []
+
+  for (const job of jobs) {
+    for (const item of [job.keeper, ...job.targets]) {
+      const problem = await checkTrashItem(item, job.group.size, hashIo)
+      if (problem) problems.push(problem)
+    }
+  }
+  if (problems.length > 0) return problems
+
+  const total = jobs.reduce((n, job) => n + job.group.size * (job.targets.length + 1), 0)
+  let done = 0
+  const report = (current: string): void => onProgress?.({ phase: 'verifying', done, total, current })
+
+  for (const job of jobs) {
+    let expected: string | null = null
+    for (const item of [job.keeper, ...job.targets]) {
+      report(item.name)
+      const result = await hashFull(item.path, hashIo, (bytes) => {
+        done += bytes
+        report(item.name)
+      })
+      if (!result.ok) {
+        problems.push(trashFail(item, result.code))
+        continue
+      }
+      if (result.size !== job.group.size) {
+        problems.push(trashFail(item, 'size-changed'))
+        continue
+      }
+      if (expected === null) expected = result.hash
+      else if (result.hash !== expected) problems.push(trashFail(item, 'hash-mismatch'))
+    }
+  }
+
+  onProgress?.({ phase: 'verifying', done: total, total, current: '' })
+  return problems
+}
+
+/**
+ * 남길 파일이 아직 그 자리에 그대로 있는가. 그룹의 파일을 보내기 직전마다 본다 —
+ * 사전 점검과 보내기 사이에 사용자가 남길 파일을 지웠으면 나머지를 보내는 순간 사본이 하나도 안 남는다.
+ */
+async function keeperIntact(job: TrashJob, hashIo: HashIo): Promise<boolean> {
+  return (await checkTrashItem(job.keeper, job.group.size, hashIo)) === null
+}
+
+async function trashOne(item: TrashItem, job: TrashJob, io: ExecutorIo, hashIo: HashIo): Promise<TrashResult> {
+  // 사전 점검과 실제 보내기 사이에 바뀔 수 있으니 바로 앞에서 한 번 더 본다 (해시는 다시 하지 않는다)
+  if (!(await keeperIntact(job, hashIo))) return trashFail(item, 'keeper-missing')
+  const problem = await checkTrashItem(item, job.group.size, hashIo)
+  if (problem) return problem
+
+  try {
+    await io.trashItem(item.path)
+    return trashSucceed(item)
+  } catch (err) {
+    if (errorCode(err) === 'ENOENT') return trashFail(item, 'missing', errorText(err))
+    return trashFail(item, 'io', errorText(err))
+  }
+}
+
+/**
+ * 휴지통으로 보낸다. 그룹 순서대로, 그룹 안에서는 남길 파일을 뺀 나머지를 하나씩. 하나가 실패해도 다음으로
+ * 넘어가고 결과는 전부 돌려준다. onResult 가 예외를 던지면(기록 실패) 남은 항목은 시도하지 않고 실패로 채운다.
+ * 반드시 preflightTrash 가 빈 목록을 돌려준 뒤에만 부른다.
+ */
+export async function executeTrash(
+  jobs: readonly TrashJob[],
+  io: ExecutorIo,
+  hashIo: HashIo,
+  hooks: TrashHooks = {}
+): Promise<TrashResult[]> {
+  const results: TrashResult[] = []
+  const queue = jobs.flatMap((job) => job.targets.map((item) => ({ item, job })))
+  const total = queue.length
+
+  for (let i = 0; i < queue.length; i += 1) {
+    const { item, job } = queue[i] as (typeof queue)[number]
+    hooks.onProgress?.({ phase: 'trashing', done: i, total, current: item.name })
+
+    const result = await trashOne(item, job, io, hashIo)
+    results.push(result)
+
+    try {
+      await hooks.onResult?.(result)
+    } catch (err) {
+      const reason = `실행 기록을 저장할 수 없어 중단했습니다 (${errorText(err)})`
+      for (const rest of queue.slice(i + 1)) results.push(trashFail(rest.item, 'io', reason))
+      break
+    }
+  }
+
+  hooks.onProgress?.({ phase: 'trashing', done: total, total, current: '' })
+  return results
 }
 
 // ---------------------------------------------------------------- 실행취소

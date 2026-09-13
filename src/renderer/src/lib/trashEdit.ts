@@ -1,4 +1,4 @@
-import type { TrashGroup, TrashPlan } from '@shared/types'
+import type { TrashGroup, TrashPlan, TrashRequest } from '@shared/types'
 
 /**
  * 휴지통 계획 화면의 편집 규칙. 순수 함수 — 부수효과가 없어 그대로 단위 테스트한다(tests/trashEdit.test.ts).
@@ -76,4 +76,14 @@ export function summarize(plan: TrashPlan): TrashSummary {
 /** 그룹에서 휴지통으로 갈 항목 — 남길 것을 뺀 나머지 */
 export function trashItemsOf(group: TrashGroup): TrashGroup['items'] {
   return group.items.filter((it) => it.id !== group.keepId)
+}
+
+/**
+ * main 에 보낼 요청. 포함한 그룹마다 **남길 파일 id** 하나 — 경로는 없고, 보낼 파일 목록도 없다.
+ * main 이 자기 계획에서 나머지를 찾는다. 뺀 그룹은 요청에 들어가지 않는다.
+ */
+export function toTrashRequests(plan: TrashPlan): TrashRequest[] {
+  return plan.groups
+    .filter((g) => g.included && g.items.length > 1)
+    .map((g) => ({ groupId: g.id, keepId: g.keepId }))
 }

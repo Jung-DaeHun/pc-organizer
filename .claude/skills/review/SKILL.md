@@ -45,16 +45,23 @@ grep -n "contextIsolation\|nodeIntegration\|sandbox\|webSecurity" src/main/index
 grep -rn "from 'node:\|require(\|from 'electron'" src/renderer/
 ```
 
-### 2-2. 사용자 파일을 움직이는 건 executor.ts 의 rename 뿐 — 사용자 파일을 지우는 코드 금지
+### 2-2. 사용자 파일을 건드리는 건 executor.ts 뿐 — 영구 삭제 코드 금지
 
-스캔·계획·AI 추천은 사용자 파일을 바꾸는 코드가 **한 줄도 없어야 한다**. 실행(B1)이 들어온 뒤에도
-사용자 파일에 쓰는 로직은 `services/executor.ts` 하나이고, 하는 일은 `mkdir`·`rename`, 그리고 실행취소가
-자기가 만든 **빈** 폴더를 치우는 `rmdir`(비재귀) 셋뿐이다.
+스캔·계획·AI 추천은 사용자 파일을 바꾸는 코드가 **한 줄도 없어야 한다**. 사용자 파일에 쓰는 로직은
+`services/executor.ts` 하나이고, 하는 일은 `mkdir`·`rename`, 실행취소가 자기가 만든 **빈** 폴더를 치우는
+`rmdir`(비재귀), 그리고 중복 후보의 나머지 사본을 윈도우 휴지통으로 보내는 `trashItem`(B3) 넷뿐이다.
 
-**사용자 파일을 지우는 호출은 어디에도 없어야 한다.** 하나라도 나오면 치명.
+**영구 삭제 호출은 어디에도 없어야 한다.** 하나라도 나오면 치명.
 
 ```bash
-grep -rn "unlink\|rm(\|rmSync\|copyFile\|trashItem\|shell.moveItemToTrash" src/main/
+grep -rn "unlink\|rm(\|rmSync\|copyFile\|shell.moveItemToTrash" src/main/
+```
+
+`trashItem`은 `executor.ts`(`trashOne` 안 `io.trashItem` 한 번)와 `handlers.ts`(`shell.trashItem` 배선)에만
+있어야 한다. 다른 곳에 나오면 보고.
+
+```bash
+grep -rn "trashItem" src/main/
 ```
 
 `rmdir`은 `executor.ts`(undoMoves, `createdFolders` 만)와 `handlers.ts`(io 배선)에만 있어야 하고
@@ -73,11 +80,12 @@ grep -rn "writeFile\|rename\|mkdir" src/main/services/ src/main/ipc/ src/main/li
 
 - `store.ts` — `userData/settings.json`·`secrets.json` (`writeFile`, `mkdir`)
 - `journal.ts` — `userData/journal.json` (`writeFile` 임시 파일 → `rename`, `mkdir`)
-- `handlers.ts` — `node:fs/promises`의 `lstat`/`mkdir`/`rename`/`rmdir`으로 `ExecutorIo`를 **만들기만** 한다
-- `executor.ts` — `io.mkdir`/`io.rename`/`io.rmdir` 호출. **`node:fs`를 import 하지 않는다** (아래로 확인)
+- `handlers.ts` — `node:fs/promises`의 `lstat`/`mkdir`/`rename`/`rmdir`과 `shell.trashItem`으로 `ExecutorIo`를
+  **만들기만** 한다
+- `executor.ts` — `io.mkdir`/`io.rename`/`io.rmdir`/`io.trashItem` 호출. **`node:fs`를 import 하지 않는다** (아래로 확인)
 
 ```bash
-grep -n "from 'node:fs" src/main/services/executor.ts src/main/services/undo.ts src/main/services/plan.ts
+grep -n "from 'node:fs" src/main/services/executor.ts src/main/services/undo.ts src/main/services/plan.ts src/main/services/dedupe.ts
 ```
 
 실행기 자체도 확인한다:
@@ -92,6 +100,19 @@ grep -n "from 'node:fs" src/main/services/executor.ts src/main/services/undo.ts 
 - `undoMoves`가 ok 였던 것만 역순으로, `to`가 그대로 있고 `from`이 비었을 때만 옮기는가
 - `undoMoves`의 폴더 치우기가 `entry.createdFolders`에 있는 이름만, `sanitizeFolderName`을 다시 거친 뒤,
   `lstat`이 진짜 디렉터리(링크 아님)일 때만 `io.rmdir`을 부르고, 실패(ENOTEMPTY 등)는 `keptFolders`로 삼키는가
+
+휴지통 실행기(B3)도 확인한다:
+- `resolveTrash`가 요청을 `lastTrashPlan`과 대조하는가 — 요청은 `{groupId, keepId}` 뿐이고 경로는 계획에서 온다.
+  모르는 그룹, 그룹에 없는 `keepId`, 같은 그룹 두 번이면 전체 거부. 남길 파일을 뺀 나머지가 대상이라
+  **그룹 전체를 지우는 요청은 만들 수 없다**
+- `preflightTrash`가 그룹의 **모든** 파일(남길 것 포함)을 `lstat`(존재·일반 파일·크기 동일·클라우드 전용 아님)한 뒤
+  `hashFull`로 전체 해시를 비교하고, 하나라도 걸리면 `blocked`로 **아무것도 보내지 않는가**
+- `trashOne`이 보내기 직전에 남길 파일이 아직 있는지(`keeperIntact`) 다시 보는가 — 없으면 `keeper-missing`
+- `executeTrashApproved`(`dedupe.ts`)가 `beginActivity('trash')` → `plan.scannedAt === getLastScannedAt()` →
+  저널에 `kind: 'trash'` 빈 기록을 **먼저** 저장(실패면 보내지 않음) → 끝나면 `lastTrashPlan = null`·`clearLastPlan()`·
+  `markStale()` 순서인가
+- `undo.ts`가 `kind === 'trash'` 기록을 거부하는가 (앱이 휴지통에서 꺼내는 코드는 없다)
+- `tests/trashExecutor.test.ts`의 "걸리면 trashItem 0회" 테스트가 살아 있는가
 
 `topLevel.ts`의 `readdir`/`lstat`은 조회다. 레지스트리도 조회만 해야 한다 — `Set-ItemProperty`,
 `Remove-Item`, `New-Item`이 있으면 보고.

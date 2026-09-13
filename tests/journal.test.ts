@@ -2,7 +2,7 @@ import { lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, rmdir, writeFile 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import type { OrganizePlan, UndoEntry } from '@shared/types'
+import type { OrganizePlan, TrashEntry, UndoEntry } from '@shared/types'
 import {
   executeMoves,
   preflight,
@@ -41,7 +41,7 @@ describe('journal — 실행 기록 저장', () => {
     await saveEntry(path, entry('e', 1000, { createdFolders: ['문서'] }))
     const all = await readJournal(path)
     expect(all).toHaveLength(1)
-    expect(all[0]?.createdFolders).toEqual(['문서'])
+    expect(all[0]).toMatchObject({ createdFolders: ['문서'] })
     expect(await findEntry(path, 'e')).toMatchObject({ createdFolders: ['문서'] })
     expect(await findEntry(path, 'nope')).toBeNull()
   })
@@ -109,6 +109,49 @@ describe('journal — 실행 기록 저장', () => {
     expect((await readJournal(path)).map((e) => e.id)).toEqual(['good'])
   })
 
+  it('kind 가 없는 옛 기록은 이동으로 읽고, 휴지통 기록은 kind: trash 로 섞여 시간순으로 온다', async () => {
+    const path = join(base, 'f', 'journal.json')
+    await mkdir(join(base, 'f'), { recursive: true })
+    const trash: TrashEntry = {
+      kind: 'trash',
+      id: 't',
+      executedAt: 2,
+      results: [{ id: '0.1', name: 'x.pdf', path: 'C:\\r\\b\\x.pdf', size: 10, ok: true }],
+      keptPaths: ['C:\\r\\a\\x.pdf']
+    }
+    // 옛 파일 그대로: kind 없는 이동 기록 하나 + 휴지통 기록 하나
+    await writeFile(path, JSON.stringify([entry('old-move', 1), trash]), 'utf8')
+
+    const all = await readJournal(path)
+    expect(all.map((e) => [e.id, e.kind])).toEqual([
+      ['t', 'trash'],
+      ['old-move', undefined]
+    ])
+    expect(all[0]).toEqual(trash)
+
+    // 갈아 끼우기와 찾기도 두 종류를 가리지 않는다
+    await saveEntry(path, { ...trash, results: [] })
+    expect(await findEntry(path, 't')).toMatchObject({ kind: 'trash', results: [] })
+    expect(await findEntry(path, 'old-move')).toMatchObject({ id: 'old-move' })
+  })
+
+  it('모양이 틀린 휴지통 기록은 버린다', async () => {
+    const path = join(base, 'f2', 'journal.json')
+    await mkdir(join(base, 'f2'), { recursive: true })
+    await writeFile(
+      path,
+      JSON.stringify([
+        { kind: 'trash', id: 'no-kept', executedAt: 1, results: [] },
+        { kind: 'trash', id: 'bad-result', executedAt: 2, results: [{ id: 'x' }], keptPaths: [] },
+        { kind: 'trash', id: 'ok', executedAt: 3, results: [], keptPaths: [] },
+        // 이동 기록에 kind: 'trash' 를 붙여도 휴지통 모양이 아니면 버린다
+        { ...entry('move-as-trash', 4), kind: 'trash' }
+      ]),
+      'utf8'
+    )
+    expect((await readJournal(path)).map((e) => e.id)).toEqual(['ok'])
+  })
+
   it('임시 파일을 남기지 않는다 (임시 파일에 쓰고 rename)', async () => {
     const path = join(base, 'e', 'journal.json')
     await saveEntry(path, entry('e', 1))
@@ -120,7 +163,16 @@ describe('journal — 실행 기록 저장', () => {
 // ---------------------------------------------------------------- 실제 파일시스템 통합
 
 /** handlers.ts 가 만드는 것과 같은 모양의 실제 io */
-const realIo: ExecutorIo = { lstat, mkdir: (p) => mkdir(p), rename, rmdir: (p) => rmdir(p) }
+const realIo: ExecutorIo = {
+  lstat,
+  mkdir: (p) => mkdir(p),
+  rename,
+  rmdir: (p) => rmdir(p),
+  // 이동·실행취소는 휴지통을 부르면 안 된다
+  trashItem: async () => {
+    throw new Error('이동 실행이 trashItem 을 불렀습니다')
+  }
+}
 
 describe('실행기 + 실제 파일시스템 (임시 디렉터리)', () => {
   it('파일 둘과 폴더 하나를 옮기고 실행취소로 원상복구한다', async () => {

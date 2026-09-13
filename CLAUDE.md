@@ -24,20 +24,22 @@ npx vitest                               # watch 모드
 
 ## 불변 조건 — 어기면 안 되는 것
 
-### 1. 사용자 파일을 움직이는 건 `executor.ts`의 `rename`뿐이다. 사용자 파일을 지우는 코드는 한 줄도 없다
+### 1. 사용자 파일을 건드리는 건 `executor.ts`뿐이다 — `rename`으로 옮기거나 `trashItem`으로 휴지통에 보낼 뿐, 영구 삭제는 없다
 
 스캔·정리 계획·AI 추천은 전부 조회다. 사용자 파일에 쓰는 코드는 **`services/executor.ts` 한 곳**이고,
-하는 일은 폴더 만들기(`mkdir`)·옮기기(`rename`)·실행취소가 **자기가 만든 빈 폴더**를 치우기(`rmdir`)
-셋뿐이다. `unlink`·`rm`·`copyFile`·`writeFile`(사용자 경로)·`trashItem`은 어디에도 없다 — 옮긴 것은
-같은 `rename`을 거꾸로 해 되돌린다.
+하는 일은 폴더 만들기(`mkdir`)·옮기기(`rename`)·실행취소가 **자기가 만든 빈 폴더**를 치우기(`rmdir`)·
+중복 후보의 나머지 사본을 **윈도우 휴지통**으로 보내기(`trashItem`) 넷뿐이다. `unlink`·`rm`·`copyFile`·
+`writeFile`(사용자 경로)은 어디에도 없다 — 옮긴 것은 같은 `rename`을 거꾸로 해 되돌리고, 휴지통에 보낸
+것은 사용자가 윈도우 휴지통에서 복원한다(앱이 휴지통에서 꺼내는 코드는 없다).
 
 `rmdir`은 **비재귀**로만 부른다(`rmdir(path)`, 옵션 없음). 안에 무엇이든 있으면 `ENOTEMPTY`로 실패해
 그대로 두므로 사용자 파일이 지워질 경로가 없다. 대상은 저널의 `createdFolders`(실행이 직접 만든 이름)
 뿐이고, 기존 폴더를 목적지로 썼으면 기록에 없어 건드리지 않는다. `recursive`를 붙이는 순간 이 보장이
 깨진다 — 절대 붙이지 않는다.
 
-- `executor.ts`는 fs 를 import 하지 않는다. `ExecutorIo = { lstat, mkdir, rename, rmdir }`를 주입받고,
-  실체는 **`ipc/handlers.ts`가 `node:fs/promises`로 만드는 객체 하나**다. 가짜 io 로 전부 테스트된다.
+- `executor.ts`는 fs 를 import 하지 않는다. `ExecutorIo = { lstat, mkdir, rename, rmdir, trashItem }`를
+  주입받고, 실체는 **`ipc/handlers.ts`가 `node:fs/promises`와 `shell.trashItem`으로 만드는 객체 하나**다.
+  가짜 io 로 전부 테스트된다.
 - 실행은 renderer 사본이 아니라 main 의 `lastPlan`과 대조한다(`resolveMoves`). 요청에는 경로가 없고
   id 와 폴더 이름만 있다. 하나라도 어긋나면 전체 거부.
 - 옮기기 전에 읽기 전용 사전 점검(`preflight`)을 돌려 **하나라도 걸리면 아무것도 옮기지 않는다**
@@ -47,11 +49,19 @@ npx vitest                               # watch 모드
   남긴다. 기록을 남길 수 없으면 실행하지 않는다. 실행·실행취소 뒤에는 `markStale()`로 스캔 목록을
   버려 다시 스캔하기 전까지 계획을 세울 수 없다.
 
+**휴지통(B3)은 규칙에서만 나오고 AI 는 관여하지 않는다.** 대상은 스캔이 찾은 중복 후보 그룹(크기 + 앞 4KB)
+뿐이고, `TrashItem`은 `PlanItem`과 다른 타입이다. 요청(`TrashRequest`)은 그룹마다 **남길 파일 id** 하나 —
+나머지가 대상이 되므로 그룹을 통째로 지우는 요청은 모양 자체가 없다. `dedupe.ts`의 `executeTrashApproved`가
+조율한다: `lastTrashPlan`과 대조(`resolveTrash`, 하나라도 어긋나면 전체 거부) → 읽기 전용 사전 점검
+(`preflightTrash` — 그룹의 **모든** 파일을 `lstat` 하고 `hashFull`로 **전체 해시**를 비교, 하나라도 다르면
+`blocked`로 아무것도 보내지 않음) → 저널에 `kind: 'trash'` 빈 기록 → 파일마다 **남길 파일이 아직 있는지
+다시 본 뒤** `trashItem`. 끝나면 `markStale()`. 저널의 `kind`가 없는 기록은 이동이다(옛 파일 호환).
+
 `userData` 아래 쓰기는 `store.ts`(`settings.json`·`secrets.json`)와 `journal.ts`(`journal.json`)만.
 레지스트리는 조회만 한다(`Set-ItemProperty` / `Remove-Item` / `New-Item` 금지).
 
 `ExecutorIo`에 메서드를 추가하거나 `executor.ts` 밖에서 쓰기 호출을 부르고 싶으면 먼저 확인을 받는다.
-휴지통(`trashItem`)은 B3(중복 후보) 작업이고 아직 없다.
+영구 삭제(`unlink`·`rm`·휴지통 비우기)는 앞으로도 넣지 않는다.
 
 ### 2. 클라우드 전용 파일의 내용을 읽지 않는다
 

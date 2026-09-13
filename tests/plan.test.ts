@@ -70,6 +70,11 @@ function spyIo(): { io: ExecutorIo; log: string[] } {
     rmdir: async (p) => {
       log.push(`rmdir ${p}`)
       await rmdir(p)
+    },
+    // 이동·실행취소는 휴지통을 부르면 안 된다
+    trashItem: async (p) => {
+      log.push(`trashItem ${p}`)
+      throw new Error('이동 실행이 trashItem 을 불렀습니다')
     }
   }
   return { io, log }
@@ -243,8 +248,8 @@ describe('undoExecution — 실행취소의 조율', () => {
 
     // 저널에 되돌린 결과가 남고, 남긴 폴더 목록도 같이 적힌다 (화면이 createdFolders 로 계산하지 않게)
     const [saved] = await readJournal(journalPath)
-    expect(saved?.undoneAt).toBeTypeOf('number')
     expect(saved).toMatchObject({ removedFolders: ['문서'], keptFolders: [] })
+    expect(saved && saved.kind !== 'trash' ? saved.undoneAt : undefined).toBeTypeOf('number')
 
     expect(scanState.staleCalls).toBe(1)
     expect(currentActivity()).toBeNull()

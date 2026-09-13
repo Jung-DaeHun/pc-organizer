@@ -5,12 +5,15 @@ import type {
   ExecuteOutcome,
   ExecuteProgress,
   ExecuteRequest,
+  JournalEntry,
   OrganizePlan,
   ScanProgress,
   ScanResult,
   Settings,
+  TrashOutcome,
   TrashPlan,
-  UndoEntry,
+  TrashProgress,
+  TrashRequest,
   UndoOutcome
 } from './types'
 
@@ -20,8 +23,8 @@ import type {
  * 이 인터페이스를 preload(구현)와 renderer(사용) 양쪽이 함께 참조하므로,
  * 한쪽만 바뀌면 타입 검사에서 걸린다.
  *
- * 계획 세우기까지는 조회 전용이다. 파일을 움직이는 채널은 executePlan 과 runUndo 둘뿐이고,
- * 둘 다 rename 만 한다 — 지우는 채널은 없다.
+ * 계획 세우기까지는 조회 전용이다. 파일을 움직이는 채널은 executePlan 과 runUndo(둘 다 rename 만),
+ * 그리고 executeTrash(윈도우 휴지통으로 — 영구 삭제 아님) 셋뿐이다.
  */
 export interface RendererApi {
   /** main 프로세스가 살아있는지 확인하는 왕복 */
@@ -73,8 +76,8 @@ export interface RendererApi {
   /** 실행 진행률 구독. 반환된 함수를 부르면 구독이 끊긴다 */
   onExecuteProgress(callback: (progress: ExecuteProgress) => void): () => void
 
-  /** 실행 기록. 최근 것이 앞 */
-  listUndo(): Promise<UndoEntry[]>
+  /** 실행 기록(이동·휴지통). 최근 것이 앞 */
+  listUndo(): Promise<JournalEntry[]>
 
   /** 실행 기록 하나를 되돌린다 (ok 였던 이동을 역순으로 to → from). 한 기록은 한 번만 */
   runUndo(id: string): Promise<UndoOutcome>
@@ -86,6 +89,17 @@ export interface RendererApi {
    * @param scannedAt 화면에 보이는 ScanResult.scannedAt — main 의 그룹이 같은 스캔인지 확인한다
    */
   buildTrashPlan(scannedAt: number): Promise<TrashPlan>
+
+  /**
+   * 화면에서 확인한 그룹의 나머지 사본을 휴지통으로 보낸다. **사용자 파일을 휴지통으로 보내는 유일한 호출.**
+   * 요청은 그룹마다 남길 파일 id 뿐이고, main 은 자기 계획(lastTrashPlan)과 대조한 뒤 전체 해시로 다시
+   * 비교해 하나라도 다르면 아무것도 보내지 않는다. 보낸 뒤에는 스캔 결과가 낡으므로 다시 스캔해야 한다.
+   * 되돌리기는 없다 — 윈도우 휴지통에서 복원한다.
+   */
+  executeTrash(requests: TrashRequest[]): Promise<TrashOutcome>
+
+  /** 휴지통 보내기 진행률(전체 해시 비교 → 보내는 중) 구독. 반환된 함수를 부르면 구독이 끊긴다 */
+  onTrashProgress(callback: (progress: TrashProgress) => void): () => void
 
   /**
    * Anthropic API 키. 저장은 main 이 암호화해서 하고, 돌려받는 건 '있다/없다' 뿐이다.

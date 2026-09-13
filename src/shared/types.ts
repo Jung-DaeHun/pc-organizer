@@ -348,8 +348,10 @@ export interface ExecutionResult {
   error?: string
 }
 
-/** 실행 한 번의 기록. userData/journal.json 에 남고 실행취소가 이걸 읽는다 */
+/** 이동 실행 한 번의 기록. userData/journal.json 에 남고 실행취소가 이걸 읽는다 */
 export interface UndoEntry {
+  /** 없으면 이동이다 — 휴지통 기록(TrashEntry)이 생기기 전의 파일도 그대로 읽는다 */
+  kind?: 'move'
   id: string
   executedAt: number
   /** 감시 폴더. 모든 from 은 이 바로 아래, 모든 to 는 이 아래 폴더 안이다 */
@@ -448,3 +450,84 @@ export interface TrashPlan {
   /** 지울 수 있는 용량이 큰 그룹이 앞 */
   groups: TrashGroup[]
 }
+
+/**
+ * renderer 가 돌려보내는 결정 하나. **남길 파일만 말한다** — 그룹의 나머지가 휴지통 대상이다.
+ * 그래서 그룹을 통째로 지우는 요청은 모양 자체가 없다. main 은 이 값을 lastTrashPlan 과 대조한 뒤에만
+ * 움직인다. 포함하지 않은 그룹은 요청에 넣지 않는다.
+ */
+export interface TrashRequest {
+  groupId: string
+  keepId: string
+}
+
+/** 휴지통 보내기 하나가 막히거나 실패한 이유. 화면 문구는 TRASH_ERROR_LABELS 에서 고른다 */
+export type TrashErrorCode =
+  | 'missing'
+  | 'not-file'
+  | 'cloud-only'
+  | 'size-changed'
+  | 'hash-mismatch'
+  | 'keeper-missing'
+  | 'io'
+
+export const TRASH_ERROR_LABELS: Record<TrashErrorCode, string> = {
+  missing: '파일이 없습니다 (스캔 뒤에 지워졌거나 옮겨졌습니다)',
+  'not-file': '일반 파일이 아닙니다 (링크·폴더)',
+  'cloud-only': '클라우드 전용 파일입니다 (내려받기 전에는 비교할 수 없습니다)',
+  'size-changed': '스캔 뒤에 크기가 바뀌었습니다',
+  'hash-mismatch': '전체 내용을 비교하니 다른 파일입니다',
+  'keeper-missing': '남기기로 한 파일이 사라져 나머지를 보내지 않았습니다',
+  io: '파일시스템 오류'
+}
+
+/** 휴지통 보내기(또는 사전 점검) 하나의 결과 */
+export interface TrashResult {
+  /** TrashItem.id */
+  id: string
+  name: string
+  path: string
+  size: number
+  ok: boolean
+  code?: TrashErrorCode
+  /** TRASH_ERROR_LABELS[code] 에 원인을 덧붙인 문장. 화면에 그대로 보여준다 */
+  error?: string
+}
+
+/**
+ * 휴지통 실행 한 번의 기록. 이동 기록(UndoEntry)과 같은 journal.json 에 `kind` 로 구분해 남는다.
+ * 되돌리기는 없다 — 윈도우 휴지통에서 복원한다. 화면은 그 안내만 한다
+ */
+export interface TrashEntry {
+  kind: 'trash'
+  id: string
+  executedAt: number
+  results: TrashResult[]
+  /** 그룹마다 남긴 파일의 경로. "무엇이 남았나"를 기록에서 볼 수 있게 */
+  keptPaths: string[]
+}
+
+/** 저널 항목. kind 가 없는 옛 기록은 이동이다 */
+export type JournalEntry = UndoEntry | TrashEntry
+
+export interface TrashProgress {
+  /** verifying — 전체 해시 비교(바이트 기준) · trashing — 휴지통으로 보내는 중(개수 기준) */
+  phase: 'verifying' | 'trashing'
+  done: number
+  total: number
+  /** 지금 다루는 파일 이름. 끝나면 빈 문자열 */
+  current: string
+}
+
+/**
+ * 휴지통 실행 결과. 'blocked' 는 사전 점검(읽기 전용 — lstat 과 전체 해시)에서 하나라도 걸려
+ * **아무것도 보내지 않은** 것이다. 계획은 그대로 남아 사용자가 걸린 그룹을 빼고 다시 실행한다.
+ */
+export type TrashOutcome =
+  | { status: 'blocked'; problems: TrashResult[] }
+  | {
+      status: 'done'
+      entry: TrashEntry
+      /** 보낸 뒤 마지막 기록 저장이 실패했을 때 그 이유 (ExecuteOutcome.journalError 와 같다) */
+      journalError?: string
+    }
