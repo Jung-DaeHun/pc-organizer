@@ -18,6 +18,8 @@ interface DashboardProps {
   hasApiKey: boolean | null
   onApiKeyChange: (hasKey: boolean) => void
   onOpenPlan: () => void
+  /** 중복 후보 정리 화면 (읽기 전용 목록). 스캔 결과가 있어야 연다 */
+  onOpenTrash: () => void
 }
 
 export default function Dashboard({
@@ -26,7 +28,8 @@ export default function Dashboard({
   onSettingsChange,
   hasApiKey,
   onApiKeyChange,
-  onOpenPlan
+  onOpenPlan,
+  onOpenTrash
 }: DashboardProps): JSX.Element {
   const [drives, setDrives] = useState<DriveInfo[] | null>(null)
   const { result, progress, isScanning, error, run, invalidate } = scan
@@ -123,7 +126,11 @@ export default function Dashboard({
             onAddFolder={() => void addFolder()}
             onRemoveFolder={(path) => void removeFolder(path)}
           />
-          <OpportunityCard opportunities={result?.opportunities ?? null} settings={settings} />
+          <OpportunityCard
+            opportunities={result?.opportunities ?? null}
+            settings={settings}
+            onOpenTrash={canPlan ? onOpenTrash : null}
+          />
           <RecentRunCard scanning={isScanning} onFilesMoved={invalidate} />
         </div>
       </main>

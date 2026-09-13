@@ -9,6 +9,7 @@ import type {
   ScanProgress,
   ScanResult,
   Settings,
+  TrashPlan,
   UndoEntry,
   UndoOutcome
 } from './types'
@@ -77,6 +78,14 @@ export interface RendererApi {
 
   /** 실행 기록 하나를 되돌린다 (ok 였던 이동을 역순으로 to → from). 한 기록은 한 번만 */
   runUndo(id: string): Promise<UndoOutcome>
+
+  /**
+   * 마지막 스캔의 중복 후보로 휴지통 계획을 세운다. 스캔이 이미 계산한 그룹을 쓰므로 파일을 읽지 않고,
+   * 계획을 세우기만 하고 파일은 건드리지 않는다.
+   *
+   * @param scannedAt 화면에 보이는 ScanResult.scannedAt — main 의 그룹이 같은 스캔인지 확인한다
+   */
+  buildTrashPlan(scannedAt: number): Promise<TrashPlan>
 
   /**
    * Anthropic API 키. 저장은 main 이 암호화해서 하고, 돌려받는 건 '있다/없다' 뿐이다.

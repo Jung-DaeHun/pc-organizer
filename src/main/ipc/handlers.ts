@@ -5,6 +5,7 @@ import { CH } from '@shared/channels'
 import type { ExecuteRequest, Settings } from '@shared/types'
 import { listApps } from '../services/apps'
 import { createStructuredCall } from '../lib/anthropic'
+import { buildTrashPlan } from '../services/dedupe'
 import { listDrives } from '../services/drives'
 import type { ExecutorIo } from '../services/executor'
 import { advise, buildPlan, executeApproved, previewPlanAdvice } from '../services/plan'
@@ -92,6 +93,9 @@ export function registerIpcHandlers(): void {
   )
   ipcMain.handle(CH.undoList, () => listUndoEntries(journalPath()))
   ipcMain.handle(CH.undoRun, (_event, id: string) => undoExecution(id, executorIo, journalPath()))
+
+  // 중복 후보 → 휴지통. build 는 조회 전용
+  ipcMain.handle(CH.trashBuild, (_event, scannedAt: number) => buildTrashPlan(scannedAt))
 
   ipcMain.handle(CH.secretsSetApiKey, (_event, key: string) => setApiKey(key))
   ipcMain.handle(CH.secretsHasApiKey, () => hasApiKey())

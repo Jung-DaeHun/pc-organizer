@@ -10,6 +10,8 @@ interface OpportunityCardProps {
   opportunities: Opportunities | null
   /** 대용량·오래된 파일의 기준값. 힌트 문구가 실제 판정 기준과 어긋나지 않게 */
   settings: Settings | null
+  /** 중복 후보 정리 화면을 연다. null 이면 열 수 없는 상태(스캔 전·스캔 중) */
+  onOpenTrash: (() => void) | null
 }
 
 interface Row {
@@ -20,9 +22,15 @@ interface Row {
   group: OpportunityGroup
   /** true면 사람이 하나씩 봐야 하는 항목. 확보 가능 용량에 더하지 않는다 */
   needsReview: boolean
+  /** 이 행의 정리 화면. 아직 없는 행은 null (버튼이 눌리지 않는다) */
+  open: (() => void) | null
 }
 
-export function OpportunityCard({ opportunities, settings }: OpportunityCardProps): JSX.Element {
+export function OpportunityCard({
+  opportunities,
+  settings,
+  onOpenTrash
+}: OpportunityCardProps): JSX.Element {
   const largeHint = settings ? `${formatBytes(settings.largeFileBytes, 0)} 이상` : '기준 크기 이상'
   const oldHint = settings ? `${settings.oldFileDays}일 넘게 손대지 않음` : '오래 손대지 않음'
 
@@ -35,7 +43,9 @@ export function OpportunityCard({ opportunities, settings }: OpportunityCardProp
           // 앞부분만 비교한 결과라는 걸 화면에서도 분명히 해둔다
           hint: '크기와 앞부분이 같은 파일. 지우기 전 전체 비교 필요',
           group: opportunities.duplicates,
-          needsReview: false
+          needsReview: false,
+          // 후보가 하나도 없으면 열어도 빈 화면이다
+          open: opportunities.duplicates.count > 0 ? onOpenTrash : null
         },
         {
           key: 'temp',
@@ -43,7 +53,8 @@ export function OpportunityCard({ opportunities, settings }: OpportunityCardProp
           label: '임시파일 · 휴지통',
           hint: '임시 폴더와 휴지통',
           group: opportunities.temp,
-          needsReview: false
+          needsReview: false,
+          open: null
         },
         {
           key: 'large',
@@ -51,7 +62,8 @@ export function OpportunityCard({ opportunities, settings }: OpportunityCardProp
           label: '대용량',
           hint: largeHint,
           group: opportunities.large,
-          needsReview: true
+          needsReview: true,
+          open: null
         },
         {
           key: 'old',
@@ -59,7 +71,8 @@ export function OpportunityCard({ opportunities, settings }: OpportunityCardProp
           label: '오래된 파일',
           hint: oldHint,
           group: opportunities.old,
-          needsReview: true
+          needsReview: true,
+          open: null
         }
       ]
     : []
@@ -126,11 +139,20 @@ export function OpportunityCard({ opportunities, settings }: OpportunityCardProp
                 </div>
               </div>
 
-              {/*
-                실행 단계에서 정리 화면으로 이어질 자리.
-                지금은 파일을 건드리는 채널이 하나도 없어 눌리지 않게 둔다.
-              */}
-              <Button variant="outline" size="sm" disabled title="다음 단계에서 열립니다">
+              {/* 정리 화면이 있는 행만 눌린다. 화면을 열 뿐 — 파일은 그 화면에서 확인한 뒤에야 움직인다 */}
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={row.open === null}
+                onClick={row.open ?? undefined}
+                title={
+                  row.open
+                    ? undefined
+                    : row.group.count === 0
+                      ? '해당하는 파일이 없습니다'
+                      : '다음 단계에서 열립니다'
+                }
+              >
                 {row.needsReview ? '검토' : '정리'}
               </Button>
             </div>

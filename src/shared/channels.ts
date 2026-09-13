@@ -39,6 +39,12 @@ export const CH = {
   undoList: 'undo:list',
   undoRun: 'undo:run',
 
+  /**
+   * 중복 후보 → 휴지통 (B3). build 는 조회 전용 — 스캔이 계산해 둔 그룹을 계획 모양으로 바꿀 뿐
+   * 파일을 읽지도 건드리지도 않는다
+   */
+  trashBuild: 'trash:build',
+
   /** API 키. 키 값이 renderer 로 돌아오는 채널은 없다 */
   secretsSetApiKey: 'secrets:set-api-key',
   secretsHasApiKey: 'secrets:has-api-key',

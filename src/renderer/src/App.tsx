@@ -3,11 +3,12 @@ import type { Settings } from '@shared/types'
 import { useScan } from '@/hooks/useScan'
 import Dashboard from '@/pages/Dashboard'
 import PlanPage from '@/pages/PlanPage'
+import TrashPage from '@/pages/TrashPage'
 
-type View = 'dashboard' | 'plan'
+type View = 'dashboard' | 'plan' | 'trash'
 
 /**
- * 화면은 둘뿐이라 라우터 없이 상태 하나로 고른다.
+ * 화면은 셋뿐이라 라우터 없이 상태 하나로 고른다.
  *
  * 스캔 결과·설정·API 키 유무는 화면을 오가도 살아 있어야 하므로 여기서 들고 있는다.
  * (계획 화면은 스캔 결과의 scannedAt 으로 main 의 목록과 같은 스캔인지 확인한다)
@@ -54,6 +55,10 @@ export default function App(): JSX.Element {
     )
   }
 
+  if (view === 'trash') {
+    return <TrashPage scan={scan} onBack={() => setView('dashboard')} />
+  }
+
   return (
     <Dashboard
       scan={scan}
@@ -62,6 +67,7 @@ export default function App(): JSX.Element {
       hasApiKey={hasApiKey}
       onApiKeyChange={setHasApiKey}
       onOpenPlan={() => setView('plan')}
+      onOpenTrash={() => setView('trash')}
     />
   )
 }

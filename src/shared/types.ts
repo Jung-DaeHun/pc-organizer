@@ -402,3 +402,49 @@ export interface UndoOutcome {
   /** 실행이 만든 폴더 중 남긴 것 (비어 있지 않음) */
   keptFolders: string[]
 }
+
+// ---------------------------------------------------------------- 중복 후보 → 휴지통 (B3)
+
+/**
+ * 휴지통 후보 하나. `PlanItem` 과 **다른 타입**이다 — 휴지통으로 가는 항목은 규칙(중복 후보)에서만
+ * 나오고 AI 경로(`OrganizePlan`)와는 타입 수준에서 분리한다.
+ *
+ * 경로는 renderer 에 보낸다 — 어느 사본을 남길지 고르려면 어디에 있는지 봐야 한다. 이 값은 화면에만 가고
+ * 네트워크로는 나가지 않는다(AI 페이로드는 `AdvisorItem` 뿐).
+ */
+export interface TrashItem {
+  /** 계획 안에서 항목을 가리키는 식별자. renderer 는 이 값으로만 항목을 지칭한다 */
+  id: string
+  path: string
+  name: string
+  size: number
+  mtimeMs: number
+  /** max(atimeMs, mtimeMs). 남길 파일 기본값을 고르는 기준 (윈도우의 atime 은 믿을 수 없다) */
+  lastTouchedMs: number
+}
+
+/** 크기와 앞 4KB 가 같은 파일 묶음. 하나는 반드시 남긴다 */
+export interface TrashGroup {
+  id: string
+  /** 그룹 안 파일의 크기. 전부 같다 */
+  size: number
+  /** 둘 이상 */
+  items: TrashItem[]
+  /** 남길 파일의 id. 항상 items 중 하나. 기본값은 가장 최근 손댄 것, 같으면 경로가 짧은 것 */
+  keepId: string
+  /** 이번 정리에 포함할지. 화면에서 끌 수 있다 */
+  included: boolean
+}
+
+/**
+ * 중복 후보 정리 계획. 스캔이 이미 계산한 그룹에서 출발하며 만드는 데 파일을 읽지 않는다.
+ * 앞 4KB 만 비교한 후보라, 휴지통으로 보내기 직전에 전체 해시로 다시 확인한다.
+ */
+export interface TrashPlan {
+  id: string
+  createdAt: number
+  /** 이 계획이 출발한 스캔. ScanResult.scannedAt 과 같다 — 파일이 움직이면(markStale) 어긋나 못 쓴다 */
+  scannedAt: number
+  /** 지울 수 있는 용량이 큰 그룹이 앞 */
+  groups: TrashGroup[]
+}

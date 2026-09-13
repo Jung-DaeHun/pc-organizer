@@ -49,6 +49,8 @@ const api: RendererApi = {
   listUndo: () => ipcRenderer.invoke(CH.undoList),
   runUndo: (id: string) => ipcRenderer.invoke(CH.undoRun, id),
 
+  buildTrashPlan: (scannedAt: number) => ipcRenderer.invoke(CH.trashBuild, scannedAt),
+
   setApiKey: (key: string) => ipcRenderer.invoke(CH.secretsSetApiKey, key),
   hasApiKey: () => ipcRenderer.invoke(CH.secretsHasApiKey),
   clearApiKey: () => ipcRenderer.invoke(CH.secretsClearApiKey)
