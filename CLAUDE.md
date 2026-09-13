@@ -235,13 +235,15 @@ git에는 걸리지 않는다.
 카테고리를 만드는 건 안 된다(차트 색·집계가 카테고리에 묶여 있다). 기본표에서 `ts`는 코드(TypeScript)에만 있다
 — 영상(MPEG-TS)에도 넣으면 한 확장자가 두 카테고리에 걸린다(`tests/rules.test.ts`가 겹침 없음을 못 박는다).
 
-B3에서 확인이 남은 것(2026-09-13 리뷰의 의심 — 배치 합계는 같은 날 실측으로 확인해 `recycle-bin-full`로 막았고,
-드라이브 문자 없는 볼륨 마운트 포인트는 `Win32_MountPoint` 목록으로 `recycle-bin-unknown` 처리했다):
+B3의 2026-09-13 리뷰 의심 중 배치 합계는 같은 날 실측으로 확인해 `recycle-bin-full`로 막았고, 드라이브 문자 없는
+볼륨 마운트 포인트는 `Win32_MountPoint` 목록으로 `recycle-bin-unknown` 처리했다.
 
-- **OneDrive placeholder가 휴지통 사용량에서 빠지는지** — 윈도우의 `readdir(withFileTypes)`는 모든 reparse point를
-  `isSymbolicLink()`로 보고한다(정션은 확인). 클라우드 전용 placeholder도 reparse point면 휴지통 속 `$R`
-  placeholder가 0으로 세어져 사용량이 과소계산된다. 같은 기제가 `scanner.ts`에도 걸린다. 실측이 필요하다
-  (placeholder를 만들어야 해서 사용자 손이 필요).
+**OneDrive placeholder 실측은 하지 않기로 했다**(2026-09-13 결정 — 개발 PC에 OneDrive가 없다). 미확인으로 남는 것:
+윈도우의 `readdir(withFileTypes)`는 모든 reparse point를 `isSymbolicLink()`로 보고한다(정션은 확인). 클라우드 전용
+placeholder도 reparse point면 `scanner.ts`는 그 파일을 건너뛰어 집계에서 빠지고(읽지 않으니 안전한 쪽), 휴지통 속
+`$R` placeholder는 `measureRecycleBinUsage`가 0으로 세어 사용량이 **과소계산**될 수 있다(그만큼 `recycle-bin-full`
+검사가 느슨해진다). 언젠가 막아야 한다면 실측 없이도 갈 길은 있다 — libuv 의 `lstat`은 심볼릭 링크·정션이 아닌
+reparse point를 일반 파일로 보고하므로, dirent 가 링크라 해도 `lstat`으로 다시 보면 구분된다. 지금은 그대로 둔다.
 
 설치된 앱 제거 안내도 구현됐다(2026-09-13, `AppsPage` — 구조는 `architecture.md`의 "설치된 앱"). 조회와 안내뿐이다:
 레지스트리에서 읽은 목록을 검색·정렬로 보여주고 `ms-settings:appsfeatures`를 열어 준다. 어떤 앱을 지우라고 고르지
@@ -252,4 +254,4 @@ B3에서 확인이 남은 것(2026-09-13 리뷰의 의심 — 배치 합계는 �
 (`apps.ts`의 `PS_STARTUP_ITEMS`, 대시보드 카드·설치된 앱 화면의 요약 줄). 다시 넣자는 제안이 나오면 이 결정을
 먼저 확인한다.
 
-기능 범위는 여기까지다. 남은 것은 위의 OneDrive placeholder 실측뿐이다.
+기능 범위는 여기까지다. 남은 할 일은 없다 — 위 두 결정(시작 프로그램 · placeholder 실측)을 뒤집으려면 먼저 확인한다.
