@@ -3,9 +3,10 @@ import { hashHead } from '../lib/hash'
 import { beginActivity } from './activity'
 import { mergeEntries, scanFolders } from './scanner'
 import {
-  findDuplicates,
+  groupDuplicates,
   selectLarge,
   selectOld,
+  summarizeDuplicates,
   toOpportunityGroup,
   unionBytes
 } from './opportunities'
@@ -26,8 +27,19 @@ import { measureTempAndTrash } from './temp'
 let lastEntries: FileEntry[] = []
 let lastScannedAt = 0
 
+/**
+ * 마지막 스캔의 중복 후보 그룹(크기 + 앞 4KB 해시가 같은 파일 둘 이상). 카드에는 수치만 보내고
+ * 그룹은 여기 남겨, 중복 정리 화면(B3)이 해시를 다시 돌리지 않고 이 값에서 출발한다.
+ * `lastEntries` 와 같은 스캔의 것이고 같이 바뀌고 같이 비워진다.
+ */
+let lastDuplicateGroups: FileEntry[][] = []
+
 export function getLastEntries(): readonly FileEntry[] {
   return lastEntries
+}
+
+export function getLastDuplicateGroups(): readonly (readonly FileEntry[])[] {
+  return lastDuplicateGroups
 }
 
 /** 마지막으로 끝난 스캔의 시작 시각. ScanResult.scannedAt 과 같은 값 */
@@ -41,6 +53,7 @@ export function getLastScannedAt(): number {
  */
 export function markStale(): void {
   lastEntries = []
+  lastDuplicateGroups = []
   lastScannedAt = 0
 }
 
@@ -74,15 +87,17 @@ async function scanOnce(onProgress?: (progress: ScanProgress) => void): Promise<
 
   // 중복 후보 해시와 임시 폴더 계산은 서로 무관하니 같이 돌린다.
   // 임시 폴더·휴지통은 감시 폴더 밖의 덤이라, 거기서 실패해도 본 스캔 결과는 살린다.
-  const [duplicates, temp] = await Promise.all([
-    findDuplicates(entries, hashHead),
+  const [duplicateGroups, temp] = await Promise.all([
+    groupDuplicates(entries, hashHead),
     measureTempAndTrash().catch((err: unknown) => {
       console.error('[scan] 임시 폴더 측정 실패:', err instanceof Error ? err.message : err)
       return EMPTY_GROUP
     })
   ])
+  const duplicates = summarizeDuplicates(duplicateGroups)
 
   lastEntries = entries
+  lastDuplicateGroups = duplicateGroups
   lastScannedAt = startedAt
 
   const largeEntries = selectLarge(entries, settings.largeFileBytes)

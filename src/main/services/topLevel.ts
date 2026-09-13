@@ -185,8 +185,6 @@ export async function listTopLevel(
       continue
     }
 
-    const ext = extensionOf(dirent.name)
-
     const entry = bucket?.direct
     if (!entry) {
       skip('not-in-scan')
@@ -199,6 +197,7 @@ export async function listTopLevel(
       continue
     }
 
+    const ext = extensionOf(dirent.name)
     items.push({
       id: String(items.length),
       path,

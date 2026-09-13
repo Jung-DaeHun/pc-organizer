@@ -4,9 +4,11 @@ import {
   findDuplicates,
   findLarge,
   findOld,
+  groupDuplicates,
   lastTouchedMs,
   selectLarge,
   selectOld,
+  summarizeDuplicates,
   unionBytes
 } from '../src/main/services/opportunities'
 
@@ -171,5 +173,102 @@ describe('findDuplicates', () => {
   it('크기 0인 파일은 서로 중복으로 묶지 않는다', async () => {
     const entries = [entry({ path: 'a', size: 0 }), entry({ path: 'b', size: 0 })]
     expect((await findDuplicates(entries, async () => 'empty')).count).toBe(0)
+  })
+})
+
+describe('groupDuplicates', () => {
+  // 앞부분 해시를 경로 접두로 흉내 낸다: 'x-1', 'x-2' 는 같은 내용, 'y-1' 은 다른 내용
+  const byPrefix = async (path: string): Promise<string> => path.split('-')[0] as string
+
+  it('크기와 앞부분이 같은 파일을 한 그룹으로, 그룹 안 순서는 입력 순서대로 묶는다', async () => {
+    const entries = [
+      entry({ path: 'x-1', size: 500 }),
+      entry({ path: 'y-1', size: 500 }),
+      entry({ path: 'x-2', size: 500 }),
+      entry({ path: 'x-3', size: 500 })
+    ]
+
+    const groups = await groupDuplicates(entries, byPrefix)
+
+    expect(groups).toHaveLength(1)
+    expect(groups[0]?.map((e) => e.path)).toEqual(['x-1', 'x-2', 'x-3'])
+  })
+
+  it('크기가 다르면 앞부분이 같아도 다른 그룹이다', async () => {
+    const entries = [
+      entry({ path: 'x-1', size: 500 }),
+      entry({ path: 'x-2', size: 500 }),
+      entry({ path: 'x-3', size: 700 }),
+      entry({ path: 'x-4', size: 700 })
+    ]
+
+    const groups = await groupDuplicates(entries, byPrefix)
+
+    expect(groups.map((g) => g.map((e) => e.path)).sort()).toEqual([
+      ['x-1', 'x-2'],
+      ['x-3', 'x-4']
+    ])
+  })
+
+  it('짝이 없는 파일은 그룹으로 나오지 않는다 (길이 1 그룹 없음)', async () => {
+    const entries = [
+      entry({ path: 'x-1', size: 500 }),
+      entry({ path: 'y-1', size: 500 }),
+      entry({ path: 'z-1', size: 900 })
+    ]
+
+    expect(await groupDuplicates(entries, byPrefix)).toEqual([])
+  })
+
+  it('클라우드 전용 파일은 읽지도 않고 그룹에도 넣지 않는다', async () => {
+    // 휴지통 정리(B3)는 이 그룹에서 출발한다. 여기서 새면 뒤 단계가 아무리 조심해도 늦다.
+    const hasher = vi.fn(byPrefix)
+    const entries = [
+      entry({ path: 'x-1', size: 500 }),
+      entry({ path: 'x-2', size: 500, isCloudOnly: true }),
+      entry({ path: 'x-3', size: 500 })
+    ]
+
+    const groups = await groupDuplicates(entries, hasher)
+
+    expect(hasher.mock.calls.map(([p]) => p)).toEqual(['x-1', 'x-3'])
+    expect(groups.map((g) => g.map((e) => e.path))).toEqual([['x-1', 'x-3']])
+  })
+
+  it('findDuplicates 는 groupDuplicates 를 요약한 것과 같다', async () => {
+    const entries = [
+      entry({ path: 'x-1', size: 500 }),
+      entry({ path: 'x-2', size: 500 }),
+      entry({ path: 'x-3', size: 500 }),
+      entry({ path: 'y-1', size: 900 }),
+      entry({ path: 'y-2', size: 900 })
+    ]
+
+    const viaGroups = summarizeDuplicates(await groupDuplicates(entries, byPrefix))
+    const direct = await findDuplicates(entries, byPrefix)
+
+    expect(direct).toEqual(viaGroups)
+    expect(direct.count).toBe(3)
+    expect(direct.bytes).toBe(500 * 2 + 900)
+  })
+})
+
+describe('summarizeDuplicates', () => {
+  it('그룹마다 하나를 남긴 나머지를 지울 수 있는 양으로 센다', () => {
+    const groups = [
+      [entry({ path: 'a1', size: 100 }), entry({ path: 'a2', size: 100 }), entry({ path: 'a3', size: 100 })],
+      [entry({ path: 'b1', size: 700 }), entry({ path: 'b2', size: 700 })]
+    ]
+
+    const result = summarizeDuplicates(groups)
+
+    expect(result.count).toBe(3)
+    expect(result.bytes).toBe(900)
+    // 미리보기는 남길 첫 하나를 뺀 나머지를 큰 순으로
+    expect(result.samples.map((s) => s.name)).toEqual(['b2', 'a2', 'a3'])
+  })
+
+  it('그룹이 없으면 0 이다', () => {
+    expect(summarizeDuplicates([])).toEqual({ count: 0, bytes: 0, samples: [] })
   })
 })

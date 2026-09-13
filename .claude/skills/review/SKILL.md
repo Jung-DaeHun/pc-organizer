@@ -105,18 +105,22 @@ grep -n "Set-ItemProperty\|Remove-Item\|New-Item\|Stop-Process" src/main/service
 바탕화면이 OneDrive 아래에 있다. 클라우드에만 있는 파일의 **내용을 읽는 순간** 자동 다운로드가
 시작되어 스캔 한 번에 수 GB가 샌다. 메타데이터(`stat`)만 읽는 건 안전하다.
 
-- 파일 내용을 읽는 코드(`hashHead`, `open`, `readFile`, `createReadStream`)를 부르기 전에
+- 파일 내용을 읽는 코드(`hashHead`, `hashFull`, `open`, `readFile`, `createReadStream`)를 부르기 전에
   `isCloudOnly` / `entry.isCloudOnly`로 걸러내는가
-- `findDuplicates`의 후보 필터에서 `!e.isCloudOnly` 가 빠지지 않았는가
+- `groupDuplicates`의 후보 필터에서 `!e.isCloudOnly` 가 빠지지 않았는가
+- `hashFull`(`lib/hash.ts`)이 `io.open` **직전에** `io.lstat` → `isCloudOnly` 를 거치는가. 스캔 때의
+  플래그는 믿지 않는다 — 스캔 뒤 OneDrive 가 파일을 내려놓았을 수 있다
 - `listTopLevel`(정리 계획)이 클라우드 전용 파일을 `skipped`로 빼는가. 같은 OneDrive 루트 안의
   이동은 내려받기를 유발하지 않을 것으로 보지만, 확신이 설 때까지 계획에 넣지 않는다
 
 ```bash
 grep -rn "isCloudOnly" src/main/
+grep -rn "open(\|readFile\|createReadStream" src/main/   # hash.ts · journal.ts · store.ts 밖이면 보고
 ```
 
-이 조건을 건드리는 변경이면 `tests/opportunities.test.ts`의 "클라우드 전용 파일은 절대 읽지 않는다"와
-`tests/scanner.test.ts`의 `isCloudOnly` 테스트가 여전히 그 동작을 잡아내는지 확인한다.
+이 조건을 건드리는 변경이면 `tests/opportunities.test.ts`의 "클라우드 전용 파일은 절대 읽지 않는다",
+`tests/hash.test.ts`의 "클라우드 전용이면 열지 않는다", `tests/scanner.test.ts`의 `isCloudOnly` 테스트가
+여전히 그 동작을 잡아내는지 확인한다.
 
 ### 2-4. 링크를 따라가지 않는가
 

@@ -88,20 +88,20 @@ export function unionBytes(...groups: FileEntry[][]): number {
 }
 
 /**
- * 중복 '후보'를 찾는다.
+ * 중복 '후보'를 그룹째로 찾는다. 그룹 하나 = 크기와 앞 4KB 해시가 같은 파일 둘 이상.
  *
  * 1) 크기가 같은 파일끼리 묶는다 — 크기가 다르면 내용이 같을 수 없으므로 여기서 대부분 걸러진다
  * 2) 남은 것만 앞 4KB 해시를 비교한다
  *
- * 전체 해시가 아니므로 결과는 어디까지나 후보다. 실제 삭제(2단계)에서는 전체를 다시 비교한다.
- * 클라우드 전용 파일은 읽는 순간 내려받기가 시작되므로 아예 대상에서 뺀다.
+ * 전체 해시가 아니므로 결과는 어디까지나 후보다. 휴지통으로 보내기 전(B3)에는 `hashFull` 로 전체를
+ * 다시 비교한다. 클라우드 전용 파일은 읽는 순간 내려받기가 시작되므로 아예 대상에서 뺀다.
  *
- * count/bytes는 '지울 수 있는 양'이다. 같은 파일이 3개면 2개분을 센다.
+ * 그룹 안 순서는 입력 순서를 그대로 따른다. 어느 것을 남길지는 여기서 정하지 않는다(dedupe.ts).
  */
-export async function findDuplicates(
+export async function groupDuplicates(
   entries: FileEntry[],
   hashHead: HeadHasher
-): Promise<OpportunityGroup> {
+): Promise<FileEntry[][]> {
   const candidates = entries.filter((e) => e.size > 0 && !e.isCloudOnly)
 
   const bySize = new Map<number, FileEntry[]>()
@@ -112,7 +112,7 @@ export async function findDuplicates(
   }
 
   const sizeCollisions = [...bySize.values()].filter((group) => group.length > 1)
-  if (sizeCollisions.length === 0) return emptyGroup()
+  if (sizeCollisions.length === 0) return []
 
   const byHash = new Map<string, FileEntry[]>()
   for (const group of sizeCollisions) {
@@ -128,19 +128,28 @@ export async function findDuplicates(
     }
   }
 
+  return [...byHash.values()].filter((group) => group.length > 1)
+}
+
+/**
+ * 중복 후보 그룹을 카드 수치로 줄인다.
+ *
+ * count/bytes는 '지울 수 있는 양'이다. 같은 파일이 3개면 2개분을 센다.
+ * 미리보기에는 그룹마다 첫 하나(남길 것)를 뺀 나머지를 보여준다.
+ */
+export function summarizeDuplicates(groups: FileEntry[][]): OpportunityGroup {
+  if (groups.length === 0) return emptyGroup()
+
   let count = 0
   let bytes = 0
   const redundant: FileEntry[] = []
 
-  for (const group of byHash.values()) {
-    if (group.length < 2) continue
-
+  for (const group of groups) {
     // 한 벌은 남겨야 하므로 나머지만 '지울 수 있는 것'으로 센다
     const extras = group.length - 1
     count += extras
     bytes += group[0].size * extras
 
-    // 미리보기에는 남길 하나를 뺀 나머지를 보여준다.
     // `push(...arr)` 는 그룹이 아주 크면 콜 스택을 넘기므로 하나씩 넣는다.
     for (let i = 1; i < group.length; i += 1) redundant.push(group[i] as FileEntry)
   }
@@ -153,4 +162,12 @@ export async function findDuplicates(
       .slice(0, SAMPLE_LIMIT)
       .map(toSample)
   }
+}
+
+/** 중복 후보를 찾아 카드 수치로. `groupDuplicates` + `summarizeDuplicates` */
+export async function findDuplicates(
+  entries: FileEntry[],
+  hashHead: HeadHasher
+): Promise<OpportunityGroup> {
+  return summarizeDuplicates(await groupDuplicates(entries, hashHead))
 }

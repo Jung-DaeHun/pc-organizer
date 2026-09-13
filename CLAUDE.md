@@ -58,12 +58,14 @@ npx vitest                               # watch 모드
 바탕화면이 OneDrive 아래에 있다. 클라우드에만 있는 파일은 **내용을 읽는 순간** 자동 다운로드가
 시작되어 스캔 한 번에 수 GB가 샌다. 메타데이터(`lstat`)만 읽는 건 안전하다.
 
-`scanner.ts`의 `isCloudOnly()`가 `크기 > 1KB인데 할당 블록이 0`인 파일을 그렇게 판정하고,
-`findDuplicates`는 후보 필터에서 `!e.isCloudOnly`로 걸러낸다. 1KB 하한이 있는 이유는 NTFS가
+`lib/cloudOnly.ts`의 `isCloudOnly()`가 `크기 > 1KB인데 할당 블록이 0`인 파일을 그렇게 판정하고,
+`groupDuplicates`는 후보 필터에서 `!e.isCloudOnly`로 걸러낸다. 1KB 하한이 있는 이유는 NTFS가
 아주 작은 파일을 MFT 안에 넣어버려(resident file) 똑같이 블록 0으로 잡히기 때문이다.
 
 파일 내용을 읽는 코드(`hashHead`, `open`, `readFile`, `createReadStream`)를 새로 부를 때는
-반드시 그 앞에 `isCloudOnly` 필터가 있어야 한다.
+반드시 그 앞에 `isCloudOnly` 필터가 있어야 한다. 스캔 때의 `FileEntry.isCloudOnly`는 스캔 뒤
+OneDrive가 파일을 내려놓으면 낡는다 — 전체를 읽는 `hashFull`은 **열기 직전에 `lstat`으로 다시
+판정**하고 클라우드 전용이면 열지 않는다(`tests/hash.test.ts`가 못 박는다).
 
 ### 3. 심볼릭 링크와 정션을 따라가지 않는다
 

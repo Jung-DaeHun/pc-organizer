@@ -1,21 +1,15 @@
 import { lstat, opendir } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { Stats } from 'node:fs'
 import type { FileEntry, ScanProgress } from '@shared/types'
+import { isCloudOnly } from '../lib/cloudOnly'
 import { pathKey } from '../lib/paths'
 import { categorize, extensionOf } from './categorize'
 
+// 판정 자체는 lib/cloudOnly.ts 에 있다 — 파일을 여는 hashFull 도 같은 함수를 쓴다
+export { isCloudOnly }
+
 /** 파일 몇 개마다 진행률을 흘려보낼지. 너무 잦으면 IPC가 오히려 스캔을 느리게 만든다. */
 const PROGRESS_INTERVAL = 250
-
-/**
- * 클라우드 전용 파일 판정의 최소 크기.
- *
- * NTFS는 아주 작은 파일을 MFT 안에 그대로 넣어버리는데(resident file),
- * 이 경우에도 할당 크기가 0으로 잡혀 클라우드 전용과 구분되지 않는다.
- * 1KB 이하는 어차피 해시 비용이 없으니 판정 대상에서 빼는 편이 안전하다.
- */
-const CLOUD_ONLY_MIN_SIZE = 1024
 
 export interface ScanOptions {
   /** 이 이름의 디렉터리는 통째로 건너뛴다 (소문자로 비교) */
@@ -28,17 +22,6 @@ export interface FolderScan {
   entries: FileEntry[]
   /** 권한 부족 등으로 읽지 못하고 넘어간 항목 수 */
   skippedCount: number
-}
-
-/**
- * OneDrive 등에서 클라우드에만 있고 로컬에는 실체가 없는 파일인지 본다.
- *
- * 이런 파일은 크기는 제대로 보이지만 실제로 할당된 블록이 없다.
- * 내용을 읽는 순간 자동으로 내려받기 시작하므로 해시 계산에서 반드시 제외해야 한다.
- * (메타데이터만 읽는 건 다운로드를 유발하지 않는다)
- */
-export function isCloudOnly(stats: Pick<Stats, 'size' | 'blocks'>): boolean {
-  return stats.size > CLOUD_ONLY_MIN_SIZE && Number(stats.blocks) === 0
 }
 
 /** 여러 폴더를 차례로 훑는다. 진행률 카운터는 폴더를 건너서도 이어진다. */

@@ -137,7 +137,7 @@ function isExistingDirName(plan: OrganizePlan, key: string): boolean {
 
 /**
  * 이 이름으로 열을 만들 수 없는 이유. 없으면 null.
- * 같은 이름의 파일·링크·바로가기가 루트에 있으면 실행 단계의 mkdir 이 EEXIST 로 터지고,
+ * 같은 이름의 파일·링크가 루트에 있으면 실행 단계의 mkdir 이 EEXIST 로 터지고,
  * 이미 다른 열로 보낸 폴더 카드의 이름이면 그 폴더가 열이자 카드가 되어 버린다.
  */
 function nameClash(plan: OrganizePlan, key: string): string | null {

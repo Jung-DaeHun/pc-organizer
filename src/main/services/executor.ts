@@ -136,7 +136,7 @@ export function resolveMoves(plan: OrganizePlan, requests: readonly ExecuteReque
   }
 
   // 목적지 폴더 이름은 옮기는 항목의 이름과 겹칠 수 없다. 폴더 카드를 옮기면서 그 이름으로
-  // 열을 만들면 자기 안으로 들어가거나 열이 사라진다. 파일·링크·바로가기 이름과 겹치면 mkdir 이 실패한다
+  // 열을 만들면 자기 안으로 들어가거나 열이 사라진다. 파일·링크 이름과 겹치면 mkdir 이 실패한다
   const movingKeys = new Set(moves.map((m) => folderKey(m.name)))
   const fileKeys = new Set(
     plan.items.filter((p) => p.item.kind === 'file').map((p) => folderKey(p.item.name))
