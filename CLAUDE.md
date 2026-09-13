@@ -84,7 +84,11 @@ npx vitest                               # watch 모드
 막는다(그 볼륨의 휴지통은 조회하지 않는다 — 모른다). 목록을 못 읽으면 그 루트 전체가 모른다.
 
 `userData` 아래 쓰기는 `store.ts`(`settings.json`·`secrets.json`)와 `journal.ts`(`journal.json`)만.
-레지스트리는 조회만 한다(`Set-ItemProperty` / `Remove-Item` / `New-Item` 금지).
+레지스트리는 조회만 한다(`Set-ItemProperty` / `Remove-Item` / `New-Item` 금지). 프로그램 제거도 앱이 하지
+않는다 — 레지스트리의 `UninstallString`을 실행하면 임의 프로그램을 돌리는 것이고 그것이 무엇을 지울지 앱이 알 수
+없다. 제거 안내는 윈도우 설정을 열어 주는 것까지다(`shell.openExternal`에 넘기는 값은 `services/apps.ts`의 상수
+`WINDOWS_APPS_SETTINGS_URI` 하나, renderer 인자 없음). `openExternal`·`openPath`에 renderer 에서 온 값을 넘기는
+경로를 만들지 않는다.
 
 `ExecutorIo`에 메서드를 추가하거나 `executor.ts` 밖에서 쓰기 호출을 부르고 싶으면 먼저 확인을 받는다.
 영구 삭제(`unlink`·`rm`·휴지통 비우기)는 앞으로도 넣지 않는다.
@@ -239,5 +243,9 @@ B3에서 확인이 남은 것(2026-09-13 리뷰의 의심 — 배치 합계는 �
   placeholder가 0으로 세어져 사용량이 과소계산된다. 같은 기제가 `scanner.ts`에도 걸린다. 실측이 필요하다
   (placeholder를 만들어야 해서 사용자 손이 필요).
 
-그 다음: 설치된 앱 제거 안내, 시작 프로그램 켜고 끄기(레지스트리는 조회만 한다는 규칙과 부딪히므로 설계 전에
-어디까지 쓸지 확인).
+설치된 앱 제거 안내도 구현됐다(2026-09-13, `AppsPage` — 구조는 `architecture.md`의 "설치된 앱"). 조회와 안내뿐이다:
+레지스트리에서 읽은 목록을 검색·정렬로 보여주고 `ms-settings:appsfeatures`를 열어 준다. 어떤 앱을 지우라고 고르지
+않고, `UninstallString`은 실행하지 않으며, Microsoft Store 앱(`Get-AppxPackage`)은 목록에 없다.
+
+그 다음: 시작 프로그램 켜고 끄기(레지스트리는 조회만 한다는 규칙과 부딪히므로 설계 전에 어디까지 쓸지 확인 —
+(a) 작업 관리자/`ms-settings:startupapps`로 안내만, (b) `StartupApproved` 키에 한해 쓰기 + 저널로 되돌리기).

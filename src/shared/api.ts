@@ -50,6 +50,12 @@ export interface RendererApi {
   listApps(): Promise<AppsInfo>
 
   /**
+   * 윈도우 설정의 '앱 > 설치된 앱'을 연다. 제거는 거기서 사용자가 한다 — 이 앱은 프로그램을 제거하지도,
+   * 제거 프로그램을 실행하지도 않는다. 인자가 없다 (여는 URI 는 main 에 고정)
+   */
+  openAppsSettings(): Promise<void>
+
+  /**
    * 감시 폴더 하나의 정리 계획을 확장자 규칙으로 세운다. 스캔이 먼저 있어야 한다.
    * 계획을 세우기만 하고 파일은 건드리지 않는다.
    *

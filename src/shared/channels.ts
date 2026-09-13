@@ -22,6 +22,11 @@ export const CH = {
 
   /** 설치된 앱 + 시작 프로그램 */
   appsList: 'apps:list',
+  /**
+   * 윈도우 설정의 '앱 > 설치된 앱'을 연다. 이 앱은 프로그램을 제거하지 않는다 — 제거는 거기서 사용자가 한다.
+   * 인자가 없다: 여는 URI 는 main 에 고정돼 있어 renderer 가 임의 URI 를 열 수 없다
+   */
+  appsOpenSettings: 'apps:open-settings',
 
   /** 정리 계획 (조회 전용 — 파일은 건드리지 않는다) */
   planBuild: 'plan:build',

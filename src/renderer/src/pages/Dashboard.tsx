@@ -22,6 +22,8 @@ interface DashboardProps {
   onOpenTrash: () => void
   /** 설정 화면 (테마 · 분류 규칙 · 판정 기준) */
   onOpenSettings: () => void
+  /** 설치된 앱 화면 (전체 목록 · 제거 안내 — 제거는 윈도우 설정에서) */
+  onOpenApps: () => void
 }
 
 export default function Dashboard({
@@ -32,7 +34,8 @@ export default function Dashboard({
   onApiKeyChange,
   onOpenPlan,
   onOpenTrash,
-  onOpenSettings
+  onOpenSettings,
+  onOpenApps
 }: DashboardProps): JSX.Element {
   const [drives, setDrives] = useState<DriveInfo[] | null>(null)
   const { result, progress, isScanning, error, run, invalidate } = scan
@@ -145,7 +148,7 @@ export default function Dashboard({
 
         <div className="flex flex-col gap-4 wide:order-1">
           <DriveCard drives={drives} />
-          <AppsCard />
+          <AppsCard onOpenApps={onOpenApps} />
         </div>
       </main>
     </div>

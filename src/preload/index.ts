@@ -38,6 +38,7 @@ const api: RendererApi = {
   },
 
   listApps: () => ipcRenderer.invoke(CH.appsList),
+  openAppsSettings: () => ipcRenderer.invoke(CH.appsOpenSettings),
 
   buildPlan: (root: string, scannedAt: number) =>
     ipcRenderer.invoke(CH.planBuild, root, scannedAt),

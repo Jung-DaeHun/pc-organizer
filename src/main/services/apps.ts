@@ -1,6 +1,15 @@
 import type { AppsInfo, InstalledApp, StartupItem } from '@shared/types'
 import { runPowerShellJson, toArray } from '../lib/powershell'
 
+/**
+ * 윈도우 설정의 '앱 > 설치된 앱' 페이지. 제거 안내는 여기를 열어 주는 것까지다.
+ *
+ * 이 앱은 프로그램을 제거하지 않는다 — 레지스트리의 UninstallString 을 실행하면 임의 프로그램을 돌리는
+ * 것이고, 그 프로그램이 무엇을 지울지는 앱이 알 수 없다. 여는 URI 는 여기 고정돼 있고 renderer 에서 오는
+ * 인자는 없다(handlers.ts 가 shell.openExternal 에 이 값만 넘긴다).
+ */
+export const WINDOWS_APPS_SETTINGS_URI = 'ms-settings:appsfeatures'
+
 interface RawInstalledApp {
   DisplayName: string | null
   DisplayVersion: string | null

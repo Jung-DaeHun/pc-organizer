@@ -137,6 +137,15 @@ grep -n "from 'node:fs" src/main/services/executor.ts src/main/services/undo.ts 
 grep -n "Set-ItemProperty\|Remove-Item\|New-Item\|Stop-Process" src/main/services/apps.ts
 ```
 
+프로그램 제거도 앱이 하지 않는다. `shell.openExternal`/`openPath`/`child_process`는 아래 세 곳에만 있어야 하고,
+넘기는 값이 renderer 에서 온 인자가 아니어야 한다 — `index.ts`(새 창 요청을 기본 브라우저로), `handlers.ts`
+(`WINDOWS_APPS_SETTINGS_URI` 상수 하나), `lib/powershell.ts`(`execFile('powershell.exe', …)`, 스크립트는 코드에
+고정). `UninstallString`이 주석 밖에서 나오거나 실행하는 코드가 생기면 치명(임의 프로그램 실행).
+
+```bash
+grep -rn "openExternal\|openPath\|child_process\|UninstallString" src/main/
+```
+
 ### 2-3. 클라우드 전용 파일을 읽지 않는가
 
 바탕화면이 OneDrive 아래에 있다. 클라우드에만 있는 파일의 **내용을 읽는 순간** 자동 다운로드가

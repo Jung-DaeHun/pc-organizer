@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron'
 import { CH } from '@shared/channels'
 import type { ExecuteRequest, Settings, TrashRequest } from '@shared/types'
-import { listApps } from '../services/apps'
+import { listApps, WINDOWS_APPS_SETTINGS_URI } from '../services/apps'
 import { createStructuredCall } from '../lib/anthropic'
 import { NODE_HASH_IO } from '../lib/hash'
 import { lookupRecycleBinPolicy } from '../lib/recycleBin'
@@ -77,6 +77,8 @@ export function registerIpcHandlers(): void {
   )
 
   ipcMain.handle(CH.appsList, () => listApps())
+  // 제거 안내는 윈도우 설정을 열어 주는 것까지다. URI 는 고정값 하나 — renderer 의 인자는 받지 않는다
+  ipcMain.handle(CH.appsOpenSettings, () => shell.openExternal(WINDOWS_APPS_SETTINGS_URI))
 
   ipcMain.handle(CH.planBuild, (_event, root: string, scannedAt: number) =>
     buildPlan(root, scannedAt)

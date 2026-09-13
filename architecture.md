@@ -22,9 +22,9 @@ src/main/       파일시스템·레지스트리·네트워크를 만지는 유�
   lib/          powershell · hash(hashHead 앞 4KB · hashFull 전체) · cloudOnly · paths · recycleBin(휴지통 한도·사용량 조회)
                 structured(계약) · anthropic(SDK, 유일한 네트워크)
 src/preload/    contextBridge 다리. 채널마다 감싼 함수 하나
-src/renderer/   React UI. Node 권한 없음. App 이 view 상태로 Dashboard / PlanPage / TrashPage / SettingsPage 를 고른다
-  hooks/        useScan · usePlan · useUndo · useTrash — IPC 호출과 화면 상태
-  lib/          planEdit · trashEdit · settingsEdit — 판·설정 편집 규칙(순수 함수, tests/ 가 검증) · format · theme
+src/renderer/   React UI. Node 권한 없음. App 이 view 상태로 Dashboard / PlanPage / TrashPage / SettingsPage / AppsPage 를 고른다
+  hooks/        useScan · usePlan · useUndo · useTrash · useApps — IPC 호출과 화면 상태
+  lib/          planEdit · trashEdit · settingsEdit · appsView — 판·설정·앱 목록의 편집·정렬 규칙(순수 함수, tests/ 가 검증) · format · theme
   components/   plan/(칸반·ExecuteDialog) · trash/(그룹 카드·TrashDialog) · settings/(테마·분류 규칙·판정 기준 카드) ·
                 ui/ · 대시보드 카드들
 tests/          Vitest, node 환경. 서비스는 가짜 io 로, 일부는 임시 디렉터리의 실제 fs 로 돈다
@@ -149,6 +149,20 @@ renderer 는 `useTrash` → `TrashPage`(그룹 카드마다 남길 파일 라디
 위한 힌트일 뿐 진짜 값은 `settings.json`이다(`main.tsx`가 렌더 전에 `applyCachedTheme`). main 은 창을 만들기 전에
 설정을 읽어 창 배경색과 `nativeTheme.themeSource`(스크롤바·select 목록)를 맞추고, `settings:update` 핸들러가
 바뀔 때마다 따라간다.
+
+## 설치된 앱 — 제거 안내
+
+대시보드 '설치된 앱' 카드의 버튼이 `AppsPage`를 연다. 목록은 `services/apps.ts`가 PowerShell 로 '프로그램 추가/제거'와
+같은 레지스트리 키 세 곳을 **읽은** 것이고(`apps:list`, Microsoft Store 앱은 없다), 화면은 검색·정렬(`lib/appsView.ts` —
+용량 큰 순 · 설치일 오래된 순 · 이름순, 값을 모르는 앱은 어느 기준이든 뒤)로 훑어보게 할 뿐이다. 설치일은 레지스트리
+`InstallDate`를 `parseInstallDate`가 확실한 모양(`YYYYMMDD`·`YYYY-MM-DD`·`YYYY/MM/DD`)만 받고 나머지는 모름(`-`)으로 둔다
+— `M/D/YYYY`는 1월 2일과 2월 1일이 갈리지 않아 받지 않는다.
+
+**제거는 앱이 하지 않는다.** 어떤 앱을 지우라고 고르지도 않는다(설치일이 오래됐다고 안 쓰는 앱이 아니고 크다고 지워도
+되는 앱이 아니다). '윈도우 설정에서 제거' 버튼이 `apps:open-settings`로 `shell.openExternal(WINDOWS_APPS_SETTINGS_URI)`
+(`ms-settings:appsfeatures`)를 부르는 것까지다 — URI 는 `services/apps.ts`의 상수 하나이고 renderer 에서 오는 인자는 없어
+임의 URI 를 열 수 없다. 레지스트리의 `UninstallString`은 실행하지 않는다: 임의 프로그램을 돌리는 것이고 그 프로그램이
+무엇을 지울지 앱이 알 수 없다. 돌아온 뒤 목록은 '다시 읽기'로 갱신한다.
 
 ## 저널
 
