@@ -255,7 +255,11 @@ function fakeTrashIo(trashDir: string): { io: ExecutorIo; trashed: string[] } {
 }
 
 /** 휴지통이 넉넉한 볼륨. 한도에 걸리는 경우는 따로 만든다 */
-const roomyRecycleBin: RecycleBinLookup = async () => ({ maxFileBytes: 1024 * 1024 * 1024, bypassed: false })
+const roomyRecycleBin: RecycleBinLookup = async () => ({
+  maxBytes: 1024 * 1024 * 1024,
+  bypassed: false,
+  usedBytes: 0
+})
 
 /** 임시 루트에 같은 내용 사본들을 만들고 scan 모듈 흉내를 그 그룹으로 채운다 */
 async function fixture(name: string): Promise<{ root: string; trashDir: string; journalPath: string }> {
@@ -431,7 +435,7 @@ describe('executeTrashApproved — 실제 파일시스템', () => {
     const asked: string[] = []
     const tightRecycleBin: RecycleBinLookup = async (volumeRoot) => {
       asked.push(volumeRoot)
-      return { maxFileBytes: 70_000, bypassed: false }
+      return { maxBytes: 70_000, bypassed: false, usedBytes: 0 }
     }
     const opened: string[] = []
     const spyHashIo = {
@@ -461,6 +465,43 @@ describe('executeTrashApproved — 실제 파일시스템', () => {
     expect(trashed).toEqual([])
     expect(await readdir(trashDir)).toEqual([])
     expect((await listing(root)).filter((p) => p.endsWith('report.pdf'))).toHaveLength(3)
+    expect(await readJournal(journalPath)).toEqual([])
+    expect(getLastTrashPlan()).toBe(plan)
+    expect(scanState.staleCalls).toBe(0)
+  })
+
+  it('개별로는 들어가도 휴지통에 든 것과의 합계가 한도 이상이면 아무것도 보내지 않는다', async () => {
+    const { root, trashDir, journalPath } = await fixture('bin-full')
+    const plan = buildTrashPlan(scanState.scannedAt)
+    const { io, trashed } = fakeTrashIo(trashDir)
+    // 이번에 보낼 양 = 70,000 × 2 + 3,000 = 143,000. 파일 하나는 한도(200,000) 아래지만 이미 57,000 이 들어 있다.
+    // 실제 윈도우라면 셋 다 휴지통에 들어간 뒤 탐색기가 오래된 것부터 영구 삭제했을 것이다 (2026-09-13 실측)
+    const nearlyFull: RecycleBinLookup = async () => ({ maxBytes: 200_000, bypassed: false, usedBytes: 57_000 })
+    const opened: string[] = []
+    const spyHashIo = {
+      lstat: NODE_HASH_IO.lstat,
+      open: async (path: string) => {
+        opened.push(path)
+        return NODE_HASH_IO.open(path)
+      }
+    }
+
+    const outcome = await executeTrashApproved(
+      plan.groups.map((g) => ({ groupId: g.id, keepId: g.keepId })),
+      { io, hashIo: spyHashIo, recycleBin: nearlyFull, journalPath }
+    )
+
+    expect(outcome.status).toBe('blocked')
+    if (outcome.status !== 'blocked') return
+    // 그 볼륨의 대상 전부 — 어느 것이 밀려날지 앱이 정할 수 없어 일부만 보내는 선택지는 없다
+    const targets = plan.groups.flatMap((g) => g.items.filter((it) => it.id !== g.keepId).map((it) => it.path))
+    expect(outcome.problems.map((p) => p.path).sort()).toEqual(targets.sort())
+    expect(new Set(outcome.problems.map((p) => p.code))).toEqual(new Set(['recycle-bin-full']))
+    expect(outcome.problems[0]!.error).toContain('휴지통에 이미 55.7 KB, 이번에 139.6 KB, 한도 195.3 KB')
+    expect(opened).toEqual([])
+    expect(trashed).toEqual([])
+    expect(await readdir(trashDir)).toEqual([])
+    expect((await listing(root)).filter((p) => /\.(pdf|jpg)$/.test(p))).toHaveLength(5)
     expect(await readJournal(journalPath)).toEqual([])
     expect(getLastTrashPlan()).toBe(plan)
     expect(scanState.staleCalls).toBe(0)

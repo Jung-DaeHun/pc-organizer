@@ -153,7 +153,7 @@ const codes = (results: TrashResult[]): Record<string, string | undefined> =>
   Object.fromEntries(results.map((r) => [r.path, r.code]))
 
 /** 넉넉한 휴지통 — 대부분의 테스트는 휴지통 설정이 걸림돌이 아니어야 한다 */
-const ROOMY: RecycleBinPolicy = { maxFileBytes: 1024 * 1024 * 1024, bypassed: false }
+const ROOMY: RecycleBinPolicy = { maxBytes: 1024 * 1024 * 1024, bypassed: false, usedBytes: 0 }
 
 /** 볼륨 루트마다 정한 설정을 돌려주고, 무엇을 몇 번 물었는지 남긴다 */
 function recycleBin(byRoot: Record<string, RecycleBinPolicy | null> = { 'C:\\': ROOMY }): {
@@ -298,19 +298,62 @@ describe('preflightTrash', () => {
   })
 
   // shell.trashItem 은 휴지통 최대 크기보다 큰 파일을 오류 없이 영구 삭제한다 (lib/recycleBin.ts 의 실측).
-  // 그래서 휴지통 설정 검사는 파일을 읽기 전에 가장 먼저 돌고, 걸리면 lstat 도 해시도 하지 않는다
+  // 그래서 휴지통 설정 검사는 파일을 읽기 전에 가장 먼저 돌고, 걸리면 lstat 도 해시도 하지 않는다.
+  // 해시가 끝난 뒤(수 GB 면 몇 분) 보내기 직전에 한 번 더 돈다 — 그동안 휴지통이 찼을 수 있다
   describe('휴지통 설정', () => {
-    it('보낼 파일의 볼륨마다 한 번만 묻는다', async () => {
+    it('보낼 파일의 볼륨마다 해시 전에 한 번, 해시 뒤에 한 번 묻는다', async () => {
       const d = disk()
       const rb = recycleBin()
       expect(await preflightTrash(allJobs(), d.hashIo, rb.lookup)).toEqual([])
-      expect(rb.asked).toEqual(['C:\\'])
+      expect(rb.asked).toEqual(['C:\\', 'C:\\'])
+    })
+
+    it('해시하는 동안 휴지통이 찼으면 recycle-bin-full — 해시 전의 낡은 사용량으로 보내지 않는다', async () => {
+      const d = disk()
+      // 첫 조회(해시 전)는 넉넉한데, 해시하는 사이 사용자가 탐색기에서 무언가 지워 두 번째 조회에서는 거의 찼다.
+      // 첫 값으로 보내면 사용자가 먼저 지운 그것이 밀려나 영구 삭제된다
+      const answers: RecycleBinPolicy[] = [ROOMY, { ...ROOMY, usedBytes: ROOMY.maxBytes - 1 }]
+      const lookup: RecycleBinLookup = async () => answers.shift() ?? null
+      const problems = await preflightTrash(allJobs(), d.hashIo, lookup)
+      expect(codes(problems)).toEqual({
+        'C:\\b\\x.pdf': 'recycle-bin-full',
+        'C:\\c\\x.pdf': 'recycle-bin-full',
+        'C:\\big1.bin': 'recycle-bin-full'
+      })
+      expect(answers).toEqual([]) // 두 번 물었다
+      expect(d.opened).not.toEqual([]) // 해시는 끝났고
+      expect(d.trashed).toEqual([]) // 그래도 보내지 않았다
+    })
+
+    it('같은 볼륨이 C:\\ 와 c:\\ 로 적혀 있어도 합계는 하나로 더한다', async () => {
+      // 감시 폴더 둘의 드라이브 문자 표기가 다르면 스캔 결과의 경로도 그대로 갈린다(settings.json 을 손으로 고친 경우).
+      // 볼륨 키를 원문으로 두면 합계가 둘로 쪼개져 각각 한도 아래로 통과해 버린다
+      const mixedCase: TrashPlan = {
+        ...plan,
+        groups: [
+          group('0', SAME.length, ['C:\\a\\x.pdf', 'C:\\b\\x.pdf']),
+          group('1', BIG_A.length, ['c:\\big1.bin', 'c:\\big2.bin'], 1)
+        ]
+      }
+      const d = disk({ 'c:\\big1.bin': BIG_A, 'c:\\big2.bin': BIG_A })
+      // 이번에 보낼 양 520 + 5006 — 따로 보면 둘 다 한도 아래, 합치면 한도
+      const rb = recycleBin({ 'C:\\': { ...ROOMY, maxBytes: SAME.length + BIG_A.length } })
+      const jobs = resolveTrash(mixedCase, [
+        { groupId: '0', keepId: '0.0' },
+        { groupId: '1', keepId: '1.1' }
+      ])
+      expect(codes(await preflightTrash(jobs, d.hashIo, rb.lookup))).toEqual({
+        'C:\\b\\x.pdf': 'recycle-bin-full',
+        'c:\\big1.bin': 'recycle-bin-full'
+      })
+      expect(rb.asked).toEqual(['C:\\']) // 볼륨 하나로 보고 한 번만, 처음 본 표기로 물었다
+      expect(d.opened).toEqual([])
     })
 
     it('휴지통 최대 크기 이상인 파일은 exceeds-recycle-bin — 파일을 열지 않는다', async () => {
       const d = disk()
       // 그룹 1(BIG_A)만 한도에 걸린다. 같은 크기는 안전하지 않다고 본다(>=)
-      const rb = recycleBin({ 'C:\\': { maxFileBytes: BIG_A.length, bypassed: false } })
+      const rb = recycleBin({ 'C:\\': { ...ROOMY, maxBytes: BIG_A.length } })
       const problems = await preflightTrash(allJobs(), d.hashIo, rb.lookup)
       expect(codes(problems)).toEqual({ 'C:\\big1.bin': 'exceeds-recycle-bin' })
       expect(d.opened).toEqual([])
@@ -319,13 +362,15 @@ describe('preflightTrash', () => {
 
     it('한도보다 1바이트 작으면 통과한다', async () => {
       const d = disk()
-      const rb = recycleBin({ 'C:\\': { maxFileBytes: BIG_A.length + 1, bypassed: false } })
-      expect(await preflightTrash(allJobs(), d.hashIo, rb.lookup)).toEqual([])
+      const rb = recycleBin({ 'C:\\': { ...ROOMY, maxBytes: BIG_A.length + 1 } })
+      // 그룹 1 만 — 보낼 파일이 하나뿐이라 합계 검사가 개별 경계와 같다
+      const bigOnly = resolveTrash(plan, [{ groupId: '1', keepId: '1.1' }])
+      expect(await preflightTrash(bigOnly, d.hashIo, rb.lookup)).toEqual([])
     })
 
     it("'휴지통을 쓰지 않음' 볼륨이면 recycle-bin-off — 크기와 무관하게 전부", async () => {
       const d = disk()
-      const rb = recycleBin({ 'C:\\': { maxFileBytes: ROOMY.maxFileBytes, bypassed: true } })
+      const rb = recycleBin({ 'C:\\': { ...ROOMY, bypassed: true } })
       expect(codes(await preflightTrash(allJobs(), d.hashIo, rb.lookup))).toEqual({
         'C:\\b\\x.pdf': 'recycle-bin-off',
         'C:\\c\\x.pdf': 'recycle-bin-off',
@@ -351,13 +396,71 @@ describe('preflightTrash', () => {
         groups: [group('0', SAME.length, ['C:\\a\\x.pdf', 'C:\\b\\x.pdf', 'D:\\x.pdf'])]
       }
       const d = disk({ 'D:\\x.pdf': SAME })
-      const rb = recycleBin({ 'C:\\': ROOMY, 'D:\\': { maxFileBytes: 10, bypassed: false } })
+      const rb = recycleBin({ 'C:\\': ROOMY, 'D:\\': { ...ROOMY, maxBytes: 10 } })
       const jobs = resolveTrash(twoVolumes, [{ groupId: '0', keepId: '0.0' }])
       expect(codes(await preflightTrash(jobs, d.hashIo, rb.lookup))).toEqual({
         'D:\\x.pdf': 'exceeds-recycle-bin'
       })
       expect(rb.asked.sort()).toEqual(['C:\\', 'D:\\'])
       expect(d.opened).toEqual([])
+    })
+
+    // 개별로는 한도 미만이어도 합계가 넘으면 넣을 때는 성공하고 잠시 뒤 탐색기가 오래된 것부터 영구 삭제한다
+    // (2026-09-13 실측, lib/recycleBin.ts). 어느 것이 밀려날지 앱이 정할 수 없으므로 그 볼륨은 통째로 막는다
+    describe('합계', () => {
+      // 기본 계획에서 이번에 보낼 양: 그룹 0 의 520 × 2 + 그룹 1 의 5006 × 1
+      const BATCH = SAME.length * 2 + BIG_A.length
+
+      it('보낼 합계가 한도 이상이면 recycle-bin-full — 그 볼륨의 대상 전부, 파일을 열지 않는다', async () => {
+        const d = disk()
+        const rb = recycleBin({ 'C:\\': { ...ROOMY, maxBytes: BATCH } })
+        const problems = await preflightTrash(allJobs(), d.hashIo, rb.lookup)
+        expect(codes(problems)).toEqual({
+          'C:\\b\\x.pdf': 'recycle-bin-full',
+          'C:\\c\\x.pdf': 'recycle-bin-full',
+          'C:\\big1.bin': 'recycle-bin-full'
+        })
+        expect(d.opened).toEqual([])
+        expect(d.trashed).toEqual([])
+      })
+
+      it('한도보다 1바이트 작으면 통과한다', async () => {
+        const d = disk()
+        const rb = recycleBin({ 'C:\\': { ...ROOMY, maxBytes: BATCH + 1 } })
+        expect(await preflightTrash(allJobs(), d.hashIo, rb.lookup)).toEqual([])
+      })
+
+      it('휴지통에 이미 든 양을 더한다 — 문장에 세 수치를 적는다', async () => {
+        const d = disk()
+        const rb = recycleBin({ 'C:\\': { ...ROOMY, maxBytes: BATCH + 1, usedBytes: 1 } })
+        const problems = await preflightTrash(allJobs(), d.hashIo, rb.lookup)
+        expect(Object.values(codes(problems))).toEqual(['recycle-bin-full', 'recycle-bin-full', 'recycle-bin-full'])
+        expect(problems[0]!.error).toContain('휴지통에 이미 1 B, 이번에 5.9 KB, 한도 5.9 KB')
+      })
+
+      it('파일 하나가 한도 이상인 것은 exceeds-recycle-bin 으로 따로, 나머지의 합계는 그것 없이 본다', async () => {
+        const d = disk()
+        // big1(5006)은 개별로 걸리고, 남은 520 × 2 = 1040 은 한도 5006 아래 — 이중으로 걸지 않는다
+        const rb = recycleBin({ 'C:\\': { ...ROOMY, maxBytes: BIG_A.length } })
+        expect(codes(await preflightTrash(allJobs(), d.hashIo, rb.lookup))).toEqual({
+          'C:\\big1.bin': 'exceeds-recycle-bin'
+        })
+      })
+
+      it('볼륨마다 따로 더한다 — 꽉 찬 볼륨의 파일만 막힌다', async () => {
+        const twoVolumes: TrashPlan = {
+          ...plan,
+          groups: [group('0', SAME.length, ['C:\\a\\x.pdf', 'C:\\b\\x.pdf', 'D:\\x.pdf'])]
+        }
+        const d = disk({ 'D:\\x.pdf': SAME })
+        // D: 는 520 짜리 하나가 개별로는 들어가지만(520 < 521) 이미 든 1 바이트와 합치면 한도
+        const rb = recycleBin({ 'C:\\': ROOMY, 'D:\\': { ...ROOMY, maxBytes: SAME.length + 1, usedBytes: 1 } })
+        const jobs = resolveTrash(twoVolumes, [{ groupId: '0', keepId: '0.0' }])
+        expect(codes(await preflightTrash(jobs, d.hashIo, rb.lookup))).toEqual({
+          'D:\\x.pdf': 'recycle-bin-full'
+        })
+        expect(d.opened).toEqual([])
+      })
     })
   })
 })

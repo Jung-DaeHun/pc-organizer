@@ -7,7 +7,7 @@
 ## 층 구조
 
 ```
-src/shared/     main·renderer 공용 계약 (types / channels / api / folderName). IPC를 넘는 값은 순수 데이터
+src/shared/     main·renderer 공용 계약 (types / channels / api / folderName / format). IPC를 넘는 값은 순수 데이터
 src/main/       파일시스템·레지스트리·네트워크를 만지는 유일한 곳
   index.ts      창 생성, will-navigate 차단
   ipc/          채널 등록만. 로직 없음 (API 키로 StructuredCall, node:fs + shell.trashItem 으로 ExecutorIo,
@@ -18,7 +18,7 @@ src/main/       파일시스템·레지스트리·네트워크를 만지는 유�
                 dedupe(조율, lastTrashPlan, executeTrashApproved — 중복 후보 → 휴지통)
                 executor(이동·되돌리기·휴지통, io 주입 — 사용자 파일에 쓰는 유일한 곳) · journal(실행 기록, userData) · undo(조율)
                 activity(스캔·실행·실행취소·휴지통 자물쇠 — 한 번에 하나만)
-  lib/          powershell · hash(hashHead 앞 4KB · hashFull 전체) · cloudOnly · paths · recycleBin(휴지통 설정 조회)
+  lib/          powershell · hash(hashHead 앞 4KB · hashFull 전체) · cloudOnly · paths · recycleBin(휴지통 한도·사용량 조회)
                 structured(계약) · anthropic(SDK, 유일한 네트워크)
 src/preload/    contextBridge 다리. 채널마다 감싼 함수 하나
 src/renderer/   React UI. Node 권한 없음. App 이 view 상태로 Dashboard / PlanPage / TrashPage 를 고른다
@@ -106,8 +106,9 @@ renderer 는 `usePlan.execute` → `ExecuteDialog`(확인 → 진행 → 결과)
 
 실행은 `executeTrashApproved(requests, {io, hashIo, recycleBin, journalPath, onProgress})`다. 자물쇠 →
 `scannedAt` 대조 → `executor.ts`의 `resolveTrash`(계획 대조 — 요청은 `{groupId, keepId}`뿐이라 경로는 계획에서
-온다) → `preflightTrash`(읽기 전용 — 볼륨의 휴지통 설정 → 모든 파일 `lstat` → 전체 해시, 하나라도 걸리면
-`blocked`) → 저널에 `kind: 'trash'` 빈 기록 → `executeTrash`(파일마다 남길 파일이 아직 있는지 다시 본 뒤
+온다) → `preflightTrash`(읽기 전용 — 볼륨의 휴지통 한도·사용량(파일 하나가 한도 이상, 사용량 + 보낼 합계가
+한도 이상, 휴지통 안 씀, 모름) → 모든 파일 `lstat` → 전체 해시 → 휴지통 한도·사용량을 **한 번 더**(해시하는 동안
+찼을 수 있다), 하나라도 걸리면 `blocked`) → 저널에 `kind: 'trash'` 빈 기록 → `executeTrash`(파일마다 남길 파일이 아직 있는지 다시 본 뒤
 `trashItem`, 실패해도 계속, 결과마다 저널 갱신). 끝나면 `lastTrashPlan = null`, `clearLastPlan()`,
 `markStale()`. 왜 이 순서여야 하는지는 `CLAUDE.md` 불변 조건 1에 있다. 기록의 `keptPaths`는 계획 시점의
 남길 파일 목록이 아니라 **실제로 파일을 보낸 그룹**의 남길 파일이다(`onResult`에서 `ok`일 때 채운다) —
@@ -141,9 +142,12 @@ JSON이라 읽을 때 원소 모양까지 검사한다(`isEntry`). `undo.ts`는 
 
 ## PowerShell
 
-드라이브 목록·설치된 앱·볼륨의 휴지통 설정은 Node API로 얻을 수 없어 `lib/powershell.ts`가 `powershell.exe`를
+드라이브 목록·설치된 앱·볼륨의 휴지통 한도는 Node API로 얻을 수 없어 `lib/powershell.ts`가 `powershell.exe`를
 부른다. 전부 조회 전용이고, 실패하면 예외 대신 `null`을 돌려준다(카드 하나가 비는 게 앱이 죽는 것보다 낫다 —
-휴지통 설정은 `null`이면 "모른다 = 보내지 않는다"). `drives.ts`는 PowerShell이 막힌 환경을 위해 `fs.statfs`
+휴지통 설정은 `null`이면 "모른다 = 보내지 않는다"). 휴지통의 현재 사용량은 PowerShell이 아니라
+`lib/recycleBin.ts`의 `measureRecycleBinUsage`가 `<root>$Recycle.Bin\<SID>`를 `readdir`·`lstat`으로 읽는다
+(SID는 한도 조회에 같이 실려 오고 `S-1-…` 모양만 경로에 쓴다). Shell COM의 휴지통 열거는 쓰지 않는다 — 그
+열거 자체가 한도 초과분 밀어내기를 트리거할 가능성을 배제하지 못했다. `drives.ts`는 PowerShell이 막힌 환경을 위해 `fs.statfs`
 대비책을 가지고 있다. `ConvertTo-Json`은 항목이 하나면 배열이 아닌 객체를 내므로 `toArray()`로 받는다.
 
 ## 윈도우 경로

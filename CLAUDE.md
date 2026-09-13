@@ -62,10 +62,21 @@ npx vitest                               # watch 모드
 `HKCU\…\Explorer\BitBucket\Volume\{GUID}\MaxCapacity`, MiB)보다 큰 파일을 "너무 커서 휴지통에 넣을 수 없음"
 으로 묻지 않고 **오류 없이 영구 삭제**하고(2026-09-13 실측, Electron 44 — `FOF_NO_UI`가 확인을 자동으로
 '예'로 답한다), '휴지통을 쓰지 않음'(`NukeOnDelete`·`NoRecycleFiles` 정책)이면 전부 영구 삭제다. 휴지통이
-없는 볼륨(네트워크·subst)만 거부된다. 그래서 `lib/recycleBin.ts`가 그 설정을 **조회만** 하고(`RecycleBinLookup`,
-`handlers.ts`가 주입), `preflightTrash`가 파일을 읽기 전에 가장 먼저 본다 — 한도 **이상**(`exceeds-recycle-bin`),
-휴지통 안 씀(`recycle-bin-off`), 설정을 모름(드라이브 문자 없는 경로·조회 실패, `recycle-bin-unknown`)이면
-`blocked`. `trashItem`을 이 검사 없이 부르는 경로를 만들지 않는다.
+없는 볼륨(네트워크·subst)만 거부된다. **개별로는 한도 미만이어도 휴지통에 든 것과의 합계가 한도를 넘으면**
+넣을 때는 전부 성공하고 직후에는 휴지통에 있지만, 잠시 뒤 탐색기가 **오래된 것부터 한도 아래로 들어갈 때까지
+묻지 않고 영구 삭제**한다(같은 날 실측 — 30 GiB 4개 중 가장 나중 것 하나만 남았다). 앱이 "보냈습니다"라고
+보고한 뒤에 사라지므로 넣은 직후 확인해도 잡히지 않는다.
+
+그래서 `lib/recycleBin.ts`가 설정을 **조회만** 하고(`RecycleBinLookup`, `handlers.ts`가 주입 — 한도는 PowerShell,
+현재 사용량은 `<root>$Recycle.Bin\<SID>`의 `$R` 항목을 `readdir`·`lstat`으로 더한다. 고아 `$I`는 세지 않고,
+링크·정션은 따라가지 않으며, Shell COM 열거는 밀어내기를 트리거할 수 있어 쓰지 않는다), `preflightTrash`가
+파일을 읽기 전에 가장 먼저 본다 — 파일 하나가 한도 **이상**(`exceeds-recycle-bin`), 사용량 + 보낼 합계가 한도
+이상(`recycle-bin-full`, 그 볼륨의 대상 전부 — 어느 것이 밀려날지 앱이 정할 수 없다), 휴지통 안 씀
+(`recycle-bin-off`), 설정이나 사용량을 모름(드라이브 문자 없는 경로·조회 실패·읽기 실패, `recycle-bin-unknown`)
+이면 `blocked`. 전체 해시가 끝난 뒤 보내기 직전에 **같은 검사를 한 번 더** 한다 — 해시하는 몇 분 사이에 사용자가
+탐색기에서 지운 것으로 휴지통이 찼으면, 낡은 사용량으로 보낼 때 밀려나는 건 사용자가 먼저 지운 그 파일이다.
+볼륨 키는 `pathKey`로 접는다(`C:\`와 `c:\`가 갈리면 합계가 쪼개진다). `trashItem`을 이 검사 없이 부르는 경로를
+만들지 않는다.
 
 `userData` 아래 쓰기는 `store.ts`(`settings.json`·`secrets.json`)와 `journal.ts`(`journal.json`)만.
 레지스트리는 조회만 한다(`Set-ItemProperty` / `Remove-Item` / `New-Item` 금지).
@@ -206,11 +217,8 @@ git에는 걸리지 않는다.
 휴지통 실행취소는 안내만 한다("윈도우 휴지통에서 복원"). 앱이 휴지통에서 꺼내는 코드는 없고 앞으로도
 넣지 않는다.
 
-B3에서 확인이 남은 것(2026-09-13 리뷰의 의심, 재현 못 함):
+B3에서 확인이 남은 것(2026-09-13 리뷰의 의심 — 배치 합계는 같은 날 실측으로 확인해 `recycle-bin-full`로 막았다):
 
-- **배치 합계** — `preflightTrash`는 파일 하나씩 `size >= maxFileBytes`만 본다. 윈도우 휴지통이 볼륨
-  총 한도를 넘을 때 오래된 항목부터 영구 삭제해 자리를 만든다면, 개별로는 통과한 큰 사본 여러 개를
-  한 번에 보낼 때 앞서 보낸 것이 밀려날 수 있다. 실측 뒤 사실이면 볼륨별 합계도 한도와 비교해 막는다.
 - **드라이브 문자 없는 볼륨 마운트 포인트** — `C:\Data`에 마운트된 별도 볼륨의 파일이 `C:\` 정책으로
   판정된다. 스캐너가 정션(마운트 포인트도 같은 reparse 태그)을 내려가지 않아 보통 닿지 않지만, 스캔
   루트를 그 안으로 잡으면 닿는다. `Win32_Volume`에서 `DriveLetter` 없이 `Name`이 경로 접두인 볼륨이

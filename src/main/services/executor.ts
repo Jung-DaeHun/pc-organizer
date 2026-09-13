@@ -19,6 +19,7 @@ import {
   type UndoEntry
 } from '@shared/types'
 import { folderKey, sanitizeFolderName } from '@shared/folderName'
+import { formatBytes } from '@shared/format'
 import { isCloudOnly } from '../lib/cloudOnly'
 import { hashFull, type HashIo } from '../lib/hash'
 import { pathKey } from '../lib/paths'
@@ -42,8 +43,11 @@ import type { RecycleBinLookup, RecycleBinPolicy } from '../lib/recycleBin'
  *
  * **trashItem 자체는 영구 삭제를 막아 주지 않는다.** 윈도우 쉘은 볼륨의 휴지통 최대 크기보다 큰 파일을
  * "너무 커서 휴지통에 넣을 수 없음" 으로 묻지 않고 영구 삭제하고, '휴지통을 쓰지 않음' 설정이면 전부 영구
- * 삭제다 (lib/recycleBin.ts 에 실측 기록). 그래서 preflightTrash 가 파일 I/O 보다 먼저 볼륨의 휴지통 설정을
- * 읽어 한도 이상이거나 설정을 모르면 막는다 — trashItem 은 이 검사를 통과한 파일에만 부른다.
+ * 삭제다. 개별로는 한도 미만이어도 **들어 있는 것과의 합계**가 한도를 넘으면 넣을 때는 성공하지만 잠시 뒤
+ * 탐색기가 오래된 것부터 묻지 않고 영구 삭제한다 (lib/recycleBin.ts 에 실측 기록). 그래서 preflightTrash 가
+ * 파일 I/O 보다 먼저 볼륨의 휴지통 설정과 현재 사용량을 읽어, 파일 하나가 한도 이상이거나 사용량 + 보낼 합계가
+ * 한도 이상이거나 설정을 모르면 막고, 전체 해시가 끝난 뒤 보내기 직전에 같은 검사를 한 번 더 한다(해시하는
+ * 동안 휴지통이 찼을 수 있다) — trashItem 은 이 검사를 통과한 파일에만 부른다.
  */
 
 /** lstat 결과 중 실행기가 보는 것. node:fs 의 Stats 가 그대로 맞는다 */
@@ -429,7 +433,11 @@ async function checkTrashItem(
 }
 
 /**
- * 보낼 파일마다 그 볼륨의 휴지통이 받아주는지 (읽기 전용 — 레지스트리 조회). 걸린 것만 돌려준다.
+ * 보낼 파일마다 그 볼륨의 휴지통이 받아주는지 (읽기 전용 — 레지스트리·fs 조회). 걸린 것만 돌려준다.
+ *
+ * 1) 파일 하나씩 — 설정을 모름 / 휴지통 안 씀 / 한도 이상. 2) 볼륨마다 — 1)을 통과한 파일의 합계를
+ * 현재 사용량에 더해 한도 이상이면 그 볼륨의 대상 전부 `recycle-bin-full`. 탐색기가 나중에 오래된 것부터
+ * 영구 삭제하므로 일부만 보내는 선택지는 없다(어느 것이 밀려날지 앱이 정할 수 없다).
  *
  * 볼륨마다 한 번만 조회한다. 드라이브 문자가 없는 경로(UNC 등)와 조회 실패는 '모른다' 이고, 모르면
  * 보내지 않는다 — trashItem 이 그런 볼륨에서 무엇을 하는지 확인할 길이 없다.
@@ -437,17 +445,35 @@ async function checkTrashItem(
 async function checkRecycleBin(jobs: readonly TrashJob[], lookup: RecycleBinLookup): Promise<TrashResult[]> {
   const problems: TrashResult[] = []
   const policies = new Map<string, RecycleBinPolicy | null>()
+  /** 볼륨마다, 개별 검사를 통과해 이번에 보내게 될 것 */
+  const pending = new Map<string, { policy: RecycleBinPolicy; bytes: number; items: TrashItem[] }>()
 
   for (const job of jobs) {
     for (const item of job.targets) {
       const root = parse(item.path).root
-      if (!policies.has(root)) policies.set(root, await lookup(root))
-      const policy = policies.get(root) ?? null
+      // 같은 볼륨이 `C:\` 와 `c:\` 로 적혀 있어도 합계는 하나여야 한다 — 키는 pathKey 로 접고 조회는 원문으로
+      const key = pathKey(root)
+      if (!policies.has(key)) policies.set(key, await lookup(root))
+      const policy = policies.get(key) ?? null
 
       if (policy === null) problems.push(trashFail(item, 'recycle-bin-unknown'))
       else if (policy.bypassed) problems.push(trashFail(item, 'recycle-bin-off'))
-      else if (job.group.size >= policy.maxFileBytes) problems.push(trashFail(item, 'exceeds-recycle-bin'))
+      else if (job.group.size >= policy.maxBytes) problems.push(trashFail(item, 'exceeds-recycle-bin'))
+      else {
+        const volume = pending.get(key) ?? { policy, bytes: 0, items: [] }
+        volume.bytes += job.group.size
+        volume.items.push(item)
+        pending.set(key, volume)
+      }
     }
+  }
+
+  for (const { policy, bytes, items } of pending.values()) {
+    if (policy.usedBytes + bytes < policy.maxBytes) continue
+    const detail =
+      `휴지통에 이미 ${formatBytes(policy.usedBytes)}, 이번에 ${formatBytes(bytes)}, ` +
+      `한도 ${formatBytes(policy.maxBytes)}`
+    for (const item of items) problems.push(trashFail(item, 'recycle-bin-full', detail))
   }
   return problems
 }
@@ -455,12 +481,16 @@ async function checkRecycleBin(jobs: readonly TrashJob[], lookup: RecycleBinLook
 /**
  * 전부 점검만 한다 — **아무것도 보내지 않는다.** 걸린 것만 돌려준다 (비어 있으면 실행해도 된다).
  *
- * 0) 보낼 파일의 볼륨마다 휴지통 설정 — 최대 크기 이상이거나, 휴지통을 쓰지 않거나, 설정을 모르면 막는다.
- *    trashItem 은 이런 파일을 오류 없이 영구 삭제하므로, 파일을 읽기 전에 가장 먼저 본다
+ * 0) 보낼 파일의 볼륨마다 휴지통 설정 — 파일 하나가 최대 크기 이상이거나, 들어 있는 것과 보낼 것의 합계가
+ *    최대 크기 이상이거나, 휴지통을 쓰지 않거나, 설정을 모르면 막는다. trashItem 은 이런 파일을 오류 없이
+ *    (합계 초과는 나중에 탐색기가) 영구 삭제하므로, 파일을 읽기 전에 가장 먼저 본다
  * 1) 모든 그룹의 모든 파일(남길 것 포함)을 lstat — 있고, 일반 파일이고, 크기가 계획과 같고, 클라우드
  *    전용이 아니다. 하나라도 걸리면 여기서 끝낸다(수 GB 를 읽기 전에 멈춘다)
  * 2) 그룹마다 전체 해시 — 남길 파일과 나머지 전부가 같아야 한다. 앞 4KB 만 같았던 '후보'가 여기서 확정된다.
  *    hashFull 은 열기 직전에 lstat 으로 클라우드 전용 여부를 다시 본다
+ * 3) 0)을 한 번 더 — 해시하는 동안(수 GB 면 몇 분) 사용자가 탐색기에서 다른 것을 지워 휴지통이 찼을 수 있다.
+ *    0)의 낡은 사용량으로 보내면 **사용자가 먼저 지운 것**이 밀려나 영구 삭제된다. 창을 완전히 닫지는 못하지만
+ *    (보내는 도중에도 바뀐다) 몇 분에서 몇 초로 줄인다. 비용은 볼륨마다 조회 한 번, 해시에 비하면 없는 셈이다
  */
 export async function preflightTrash(
   jobs: readonly TrashJob[],
@@ -505,7 +535,9 @@ export async function preflightTrash(
   }
 
   onProgress?.({ phase: 'verifying', done: total, total, current: '' })
-  return problems
+  if (problems.length > 0) return problems
+
+  return checkRecycleBin(jobs, recycleBin)
 }
 
 /**

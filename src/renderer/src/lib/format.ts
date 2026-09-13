@@ -1,21 +1,7 @@
 /** 화면 표기용 순수 함수 모음. 부수효과가 없어 그대로 단위 테스트한다. */
 
-const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'] as const
-
-/**
- * 바이트를 사람이 읽는 크기로. 윈도우 탐색기와 같은 1024 기준을 쓴다.
- * (탐색기도 1024로 나누고 라벨은 KB/MB/GB로 적는다)
- */
-export function formatBytes(bytes: number, fractionDigits = 1): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
-
-  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), BYTE_UNITS.length - 1)
-  const value = bytes / 1024 ** exponent
-  // 바이트 단위에서 소수점은 의미가 없다
-  const digits = exponent === 0 ? 0 : fractionDigits
-
-  return `${value.toFixed(digits)} ${BYTE_UNITS[exponent]}`
-}
+// 크기 표기는 main 의 오류 문장(executor.ts)과 같은 함수를 쓴다 — 화면과 문장의 수치가 어긋나지 않게
+export { formatBytes } from '@shared/format'
 
 /** 1234 -> '1,234' */
 export function formatCount(n: number): string {
