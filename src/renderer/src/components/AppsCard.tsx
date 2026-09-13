@@ -31,7 +31,9 @@ export function AppsCard({ onOpenApps }: AppsCardProps): JSX.Element {
             <CardDescription>
               {summary
                 ? `${formatCount(summary.count)}개 · 확인된 용량 ${formatBytes(summary.knownSizeBytes)}`
-                : '레지스트리에서 읽는 중'}
+                : error
+                  ? '목록을 읽지 못했습니다'
+                  : '레지스트리에서 읽는 중'}
             </CardDescription>
           </div>
         </div>

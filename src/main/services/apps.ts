@@ -32,6 +32,10 @@ interface RawStartupItem {
  * '프로그램 추가/제거'가 읽는 것과 같은 레지스트리 키 세 곳을 훑는다.
  * 32비트 앱은 WOW6432Node 아래에, 사용자 전용 설치는 HKCU 아래에 따로 들어간다.
  * 조회만 하며 어떤 값도 쓰지 않는다.
+ *
+ * 두 스크립트 모두 `ConvertTo-Json -InputObject @(...)`로 끝난다 — 파이프(`| ConvertTo-Json`)는 항목이 없으면
+ * 아무것도 내지 않고 하나면 배열 대신 객체를 내는데, `-InputObject`에 배열을 주면 0개·1개도 `[]`·`[{…}]`다.
+ * 그래야 `runPowerShellJson`의 `null`(빈 출력·실패)이 "빈 목록"이 아니라 "조회 실패"로 확정된다.
  */
 const PS_INSTALLED_APPS = String.raw`
 $paths = @(
@@ -39,10 +43,12 @@ $paths = @(
   'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
   'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
 )
-Get-ItemProperty -Path $paths -ErrorAction SilentlyContinue |
-  Where-Object { $_.DisplayName -and -not $_.SystemComponent -and -not $_.ParentKeyName } |
-  Select-Object DisplayName, DisplayVersion, Publisher, EstimatedSize, InstallDate, InstallLocation |
-  ConvertTo-Json -Compress
+$apps = @(
+  Get-ItemProperty -Path $paths -ErrorAction SilentlyContinue |
+    Where-Object { $_.DisplayName -and -not $_.SystemComponent -and -not $_.ParentKeyName } |
+    Select-Object DisplayName, DisplayVersion, Publisher, EstimatedSize, InstallDate, InstallLocation
+)
+ConvertTo-Json -InputObject $apps -Compress
 `
 
 /**
@@ -89,21 +95,36 @@ foreach ($folder in $startupFolders) {
   }
 }
 
-$items | ConvertTo-Json -Compress
+ConvertTo-Json -InputObject @($items) -Compress
 `
 
-export async function listApps(): Promise<AppsInfo> {
-  // 두 조회는 서로 무관하므로 동시에 돌린다
-  const [rawApps, rawStartup] = await Promise.all([
-    runPowerShellJson<RawInstalledApp | RawInstalledApp[]>(PS_INSTALLED_APPS),
-    runPowerShellJson<RawStartupItem | RawStartupItem[]>(PS_STARTUP_ITEMS)
-  ])
+/** PowerShell 조회 — 실패하면 null (`lib/powershell.ts`). 테스트가 가짜로 바꾼다 */
+export type AppsQuery = (script: string) => Promise<unknown>
 
-  return {
-    apps: normalizeApps(toArray(rawApps)),
-    startup: normalizeStartup(toArray(rawStartup))
+/** 조회를 조립한다. 실제는 `listApps`, 테스트는 가짜 query 로 만든다 */
+export function createAppsLister(query: AppsQuery = runPowerShellJson): () => Promise<AppsInfo> {
+  return async () => {
+    // 두 조회는 서로 무관하므로 동시에 돌린다
+    const [rawApps, rawStartup] = await Promise.all([
+      query(PS_INSTALLED_APPS),
+      query(PS_STARTUP_ITEMS)
+    ])
+
+    // 스크립트는 항목이 없어도 `[]`를 내므로 null 은 빈 목록이 아니라 조회 실패다(PowerShell 차단·타임아웃).
+    // 빈 목록으로 흘려보내면 화면이 "설치된 앱이 없습니다"라고 거꾸로 말한다 — 거부해서 훅의 error 경로로 보낸다
+    if (rawApps === null || rawStartup === null) {
+      throw new Error('설치된 앱 목록을 읽지 못했습니다 (PowerShell 조회 실패)')
+    }
+
+    return {
+      apps: normalizeApps(toArray(rawApps as RawInstalledApp | RawInstalledApp[])),
+      startup: normalizeStartup(toArray(rawStartup as RawStartupItem | RawStartupItem[]))
+    }
   }
 }
+
+/** 실제 조회. handlers.ts 가 부른다 */
+export const listApps = createAppsLister()
 
 function normalizeApps(raw: RawInstalledApp[]): InstalledApp[] {
   const seen = new Set<string>()

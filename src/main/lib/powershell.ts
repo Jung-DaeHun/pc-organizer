@@ -11,6 +11,10 @@ const execFileAsync = promisify(execFile)
  *
  * 실패하면 예외를 던지지 않고 null을 돌려준다. 카드 하나가 비는 것이
  * 앱 전체가 죽는 것보다 낫기 때문이다.
+ *
+ * 출력이 비어도 null 이다 — 파이프로 끝나는 `| ConvertTo-Json`은 항목이 없으면 아무것도 내지 않아
+ * "빈 결과"와 "실패"가 같은 null 로 겹친다. 둘을 갈라야 하는 호출부(`services/apps.ts`)는 스크립트를
+ * `ConvertTo-Json -InputObject @(...)`로 끝내 빈 결과를 `[]`로 받고, null 은 실패로만 다룬다.
  */
 export async function runPowerShellJson<T>(script: string, timeoutMs = 20_000): Promise<T | null> {
   // 한글 볼륨명/앱 이름이 깨지지 않도록 출력 인코딩을 UTF-8로 고정한다

@@ -158,6 +158,10 @@ renderer 는 `useTrash` → `TrashPage`(그룹 카드마다 남길 파일 라디
 `InstallDate`를 `parseInstallDate`가 확실한 모양(`YYYYMMDD`·`YYYY-MM-DD`·`YYYY/MM/DD`)만 받고 나머지는 모름(`-`)으로 둔다
 — `M/D/YYYY`는 1월 2일과 2월 1일이 갈리지 않아 받지 않는다.
 
+조회 실패는 빈 목록과 구분한다. 두 스크립트는 `ConvertTo-Json -InputObject @(...)`로 끝나 항목이 없어도 `[]`를 내므로,
+`runPowerShellJson`의 `null`(PowerShell 차단·타임아웃)은 실패뿐이고 `listApps`(`createAppsLister`)가 **거부**해 훅의
+`error` 경로로 보낸다 — 빈 목록으로 흘려보내면 화면이 "설치된 앱이 없습니다"라고 거꾸로 말한다(`tests/apps.test.ts`).
+
 **제거는 앱이 하지 않는다.** 어떤 앱을 지우라고 고르지도 않는다(설치일이 오래됐다고 안 쓰는 앱이 아니고 크다고 지워도
 되는 앱이 아니다). '윈도우 설정에서 제거' 버튼이 `apps:open-settings`로 `shell.openExternal(WINDOWS_APPS_SETTINGS_URI)`
 (`ms-settings:appsfeatures`)를 부르는 것까지다 — URI 는 `services/apps.ts`의 상수 하나이고 renderer 에서 오는 인자는 없어
@@ -195,7 +199,9 @@ JSON이라 읽을 때 원소 모양까지 검사한다(`isEntry`). `undo.ts`는 
 목록도 실어 온다 — 드라이브 문자 없이 폴더에 마운트된 볼륨은 휴지통이 자기 것이라, 그 아래 파일은
 `recycle-bin-unknown`으로 막는다(`mountPointOf`). Shell COM의 휴지통 열거는 쓰지 않는다 — 그
 열거 자체가 한도 초과분 밀어내기를 트리거할 가능성을 배제하지 못했다. `drives.ts`는 PowerShell이 막힌 환경을 위해 `fs.statfs`
-대비책을 가지고 있다. `ConvertTo-Json`은 항목이 하나면 배열이 아닌 객체를 내므로 `toArray()`로 받는다.
+대비책을 가지고 있다. 파이프로 끝나는 `| ConvertTo-Json`은 항목이 하나면 배열이 아닌 객체를 내고 없으면 아무것도 내지
+않는다(빈 출력 = `null` = 실패와 겹친다) — `toArray()`로 받고, 빈 결과와 실패를 갈라야 하는 곳(`apps.ts`)은
+`ConvertTo-Json -InputObject @(...)`로 항상 배열을 낸다.
 
 ## 윈도우 경로
 
