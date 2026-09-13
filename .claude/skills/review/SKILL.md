@@ -138,9 +138,10 @@ grep -n "Set-ItemProperty\|Remove-Item\|New-Item\|Stop-Process" src/main/service
 ```
 
 프로그램 제거도 앱이 하지 않는다. `shell.openExternal`/`openPath`/`child_process`는 아래 세 곳에만 있어야 하고,
-넘기는 값이 renderer 에서 온 인자가 아니어야 한다 — `index.ts`(새 창 요청을 기본 브라우저로), `handlers.ts`
-(`WINDOWS_APPS_SETTINGS_URI` 상수 하나), `lib/powershell.ts`(`execFile('powershell.exe', …)`, 스크립트는 코드에
-고정). `UninstallString`이 주석 밖에서 나오거나 실행하는 코드가 생기면 치명(임의 프로그램 실행).
+넘기는 값이 renderer 에서 온 인자가 아니어야 한다 — `index.ts`(새 창 요청을 기본 브라우저로 — 이 url 만은 renderer 의
+값이라 `isWebUrl`로 `http:`/`https:`만 통과, `tests/webUrl.test.ts`), `handlers.ts`(`WINDOWS_APPS_SETTINGS_URI` 상수
+하나), `lib/powershell.ts`(`execFile('powershell.exe', …)`, 스크립트는 코드에 고정). `UninstallString`이 주석 밖에서
+나오거나 실행하는 코드가 생기면 치명(임의 프로그램 실행). `index.ts`의 `openExternal` 앞에서 `isWebUrl` 검사가 빠지면 결함.
 
 ```bash
 grep -rn "openExternal\|openPath\|child_process\|UninstallString" src/main/

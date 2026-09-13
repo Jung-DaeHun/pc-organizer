@@ -26,11 +26,12 @@ export const APP_SORT_LABELS: Record<AppSort, string> = {
  * 달력에 없는 날짜(2월 30일)도 null.
  */
 export function parseInstallDate(raw: string): number | null {
-  const m = /^(\d{4})[-/]?(\d{2})[-/]?(\d{2})$/.exec(raw.trim())
+  // 구분자는 없거나 둘 다 같아야 한다(\2) — '2024-01/05' 같은 섞인 모양은 확실한 게 아니다
+  const m = /^(\d{4})([-/]?)(\d{2})\2(\d{2})$/.exec(raw.trim())
   if (!m) return null
   const year = Number(m[1])
-  const month = Number(m[2])
-  const day = Number(m[3])
+  const month = Number(m[3])
+  const day = Number(m[4])
   if (month < 1 || month > 12 || day < 1 || day > 31) return null
   const date = new Date(year, month - 1, day)
   // Date 는 2월 30일을 3월 2일로 굴려 버린다 — 되돌려 비교해 걸러낸다

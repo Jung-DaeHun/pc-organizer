@@ -13,7 +13,9 @@ export interface AppsState {
 
 /**
  * 설치된 앱·시작 프로그램 목록. main 이 PowerShell 로 레지스트리를 조회한 결과의 화면용 사본이다.
- * 대시보드의 '설치된 앱' 카드와 설치된 앱 화면이 같이 쓴다. 마운트 때 한 번 읽고, refresh 로 다시 읽는다.
+ * 대시보드의 '설치된 앱' 카드와 설치된 앱 화면이 같이 쓰므로 `App` 이 **한 번** 부르고 내려보낸다 — 화면마다
+ * 부르면 대시보드 ↔ 앱 화면을 오갈 때마다 PowerShell 프로세스가 둘씩 새로 뜬다(각 최대 20초).
+ * 마운트 때 한 번 읽고, refresh 로 다시 읽는다.
  */
 export function useApps(): AppsState {
   const [info, setInfo] = useState<AppsInfo | null>(null)

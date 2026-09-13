@@ -8,6 +8,7 @@ import { DriveCard } from '@/components/DriveCard'
 import { FolderSummaryCard } from '@/components/FolderSummaryCard'
 import { OpportunityCard } from '@/components/OpportunityCard'
 import { RecentRunCard } from '@/components/RecentRunCard'
+import type { AppsState } from '@/hooks/useApps'
 import type { ScanState } from '@/hooks/useScan'
 import { formatCount, truncatePath } from '@/lib/format'
 
@@ -22,6 +23,8 @@ interface DashboardProps {
   onOpenTrash: () => void
   /** 설정 화면 (테마 · 분류 규칙 · 판정 기준) */
   onOpenSettings: () => void
+  /** 설치된 앱 목록. App 이 한 번 읽어 내려보낸다 */
+  apps: AppsState
   /** 설치된 앱 화면 (전체 목록 · 제거 안내 — 제거는 윈도우 설정에서) */
   onOpenApps: () => void
 }
@@ -35,6 +38,7 @@ export default function Dashboard({
   onOpenPlan,
   onOpenTrash,
   onOpenSettings,
+  apps,
   onOpenApps
 }: DashboardProps): JSX.Element {
   const [drives, setDrives] = useState<DriveInfo[] | null>(null)
@@ -148,7 +152,7 @@ export default function Dashboard({
 
         <div className="flex flex-col gap-4 wide:order-1">
           <DriveCard drives={drives} />
-          <AppsCard onOpenApps={onOpenApps} />
+          <AppsCard apps={apps} onOpenApps={onOpenApps} />
         </div>
       </main>
     </div>

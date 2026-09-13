@@ -88,7 +88,9 @@ npx vitest                               # watch 모드
 않는다 — 레지스트리의 `UninstallString`을 실행하면 임의 프로그램을 돌리는 것이고 그것이 무엇을 지울지 앱이 알 수
 없다. 제거 안내는 윈도우 설정을 열어 주는 것까지다(`shell.openExternal`에 넘기는 값은 `services/apps.ts`의 상수
 `WINDOWS_APPS_SETTINGS_URI` 하나, renderer 인자 없음). `openExternal`·`openPath`에 renderer 에서 온 값을 넘기는
-경로를 만들지 않는다.
+경로를 만들지 않는다. 유일한 예외는 `main/index.ts`의 `setWindowOpenHandler`(새 창 요청을 기본 브라우저로)인데,
+거기 오는 url 은 renderer 의 값이라 `lib/webUrl.ts`의 `isWebUrl`로 `http:`/`https:`만 통과시킨다 — `file:`·
+`ms-settings:` 같은 스킴은 renderer 의 값으로 열지 않는다.
 
 `ExecutorIo`에 메서드를 추가하거나 `executor.ts` 밖에서 쓰기 호출을 부르고 싶으면 먼저 확인을 받는다.
 영구 삭제(`unlink`·`rm`·휴지통 비우기)는 앞으로도 넣지 않는다.

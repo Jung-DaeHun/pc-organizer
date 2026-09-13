@@ -34,6 +34,10 @@ describe('parseInstallDate', () => {
     expect(parseInstallDate('')).toBeNull()
     expect(parseInstallDate('1/5/2024')).toBeNull()
     expect(parseInstallDate('2024-1-5')).toBeNull()
+    // 구분자가 섞이거나 한쪽에만 있으면 확실한 모양이 아니다
+    expect(parseInstallDate('2024-01/05')).toBeNull()
+    expect(parseInstallDate('202401-05')).toBeNull()
+    expect(parseInstallDate('2024-0105')).toBeNull()
     expect(parseInstallDate('20240230')).toBeNull()
     expect(parseInstallDate('20241301')).toBeNull()
     expect(parseInstallDate('2024010')).toBeNull()

@@ -20,10 +20,10 @@ src/main/       파일시스템·레지스트리·네트워크를 만지는 유�
                 executor(이동·되돌리기·휴지통, io 주입 — 사용자 파일에 쓰는 유일한 곳) · journal(실행 기록, userData) · undo(조율)
                 activity(스캔·실행·실행취소·휴지통 자물쇠 — 한 번에 하나만)
   lib/          powershell · hash(hashHead 앞 4KB · hashFull 전체) · cloudOnly · paths · recycleBin(휴지통 한도·사용량 조회)
-                structured(계약) · anthropic(SDK, 유일한 네트워크)
+                webUrl(새 창 요청 중 기본 브라우저로 넘길 http(s) 판별) · structured(계약) · anthropic(SDK, 유일한 네트워크)
 src/preload/    contextBridge 다리. 채널마다 감싼 함수 하나
 src/renderer/   React UI. Node 권한 없음. App 이 view 상태로 Dashboard / PlanPage / TrashPage / SettingsPage / AppsPage 를 고른다
-  hooks/        useScan · usePlan · useUndo · useTrash · useApps — IPC 호출과 화면 상태
+  hooks/        useScan · usePlan · useUndo · useTrash · useApps — IPC 호출과 화면 상태 (useScan·useApps 는 App 이 한 번 들고 내려보낸다)
   lib/          planEdit · trashEdit · settingsEdit · appsView — 판·설정·앱 목록의 편집·정렬 규칙(순수 함수, tests/ 가 검증) · format · theme
   components/   plan/(칸반·ExecuteDialog) · trash/(그룹 카드·TrashDialog) · settings/(테마·분류 규칙·판정 기준 카드) ·
                 ui/ · 대시보드 카드들

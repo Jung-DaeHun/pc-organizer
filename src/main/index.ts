@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { app, BrowserWindow, nativeTheme, shell } from 'electron'
 import type { Theme } from '@shared/types'
 import { registerIpcHandlers } from './ipc/handlers'
+import { isWebUrl } from './lib/webUrl'
 import { getSettings } from './services/store'
 
 /** index.css 의 --background 와 같은 값. 첫 페인트 전에 창이 이 색으로 채워진다 */
@@ -29,9 +30,10 @@ function createWindow(theme: Theme): void {
 
   win.once('ready-to-show', () => win.show())
 
-  // 외부 링크는 앱 창이 아니라 기본 브라우저로 보낸다
+  // 외부 링크는 앱 창이 아니라 기본 브라우저로 보낸다. url 은 renderer 가 준 값이라 http(s) 만 넘긴다 —
+  // file:·ms-settings: 같은 것은 renderer 의 값으로 열지 않는다(설정 열기는 handlers.ts 의 상수로만)
   win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
+    if (isWebUrl(url)) void shell.openExternal(url)
     return { action: 'deny' }
   })
 

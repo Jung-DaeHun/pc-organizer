@@ -3,7 +3,7 @@ import { ArrowLeft, ExternalLink, Loader2, Package, Power, RefreshCw, Search } f
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useApps } from '@/hooks/useApps'
+import type { AppsState } from '@/hooks/useApps'
 import {
   APP_SORTS,
   APP_SORT_LABELS,
@@ -16,6 +16,8 @@ import {
 import { errorMessage, formatBytes, formatCount, formatDate } from '@/lib/format'
 
 interface AppsPageProps {
+  /** App 이 한 번 읽어 내려보낸 목록. '다시 읽기'는 여기의 refresh */
+  apps: AppsState
   onBack: () => void
 }
 
@@ -30,8 +32,8 @@ const INPUT_CLASS =
  * 사용자가 한다. 어떤 앱을 지우라고 고르지도 않는다 — 오래 전에 설치했다고 안 쓰는 앱이 아니고 크다고
  * 지워도 되는 앱이 아니라, 용량과 설치일을 그대로 보여주고 판단은 사용자에게 둔다.
  */
-export default function AppsPage({ onBack }: AppsPageProps): JSX.Element {
-  const { info, loading, error, refresh } = useApps()
+export default function AppsPage({ apps, onBack }: AppsPageProps): JSX.Element {
+  const { info, loading, error, refresh } = apps
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<AppSort>('size')
   const [openError, setOpenError] = useState<string | null>(null)

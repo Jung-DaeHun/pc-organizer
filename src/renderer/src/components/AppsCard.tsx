@@ -3,19 +3,21 @@ import { ChevronRight, Package, Power } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useApps } from '@/hooks/useApps'
+import type { AppsState } from '@/hooks/useApps'
 import { summarizeApps } from '@/lib/appsView'
 import { formatBytes, formatCount } from '@/lib/format'
 
 const TOP_APPS = 6
 
 interface AppsCardProps {
+  /** App 이 한 번 읽어 내려보낸 목록 — 카드가 직접 읽으면 대시보드에 올 때마다 PowerShell 이 다시 뜬다 */
+  apps: AppsState
   /** 설치된 앱 화면(전체 목록 · 제거 안내)을 연다 */
   onOpenApps: () => void
 }
 
-export function AppsCard({ onOpenApps }: AppsCardProps): JSX.Element {
-  const { info, error } = useApps()
+export function AppsCard({ apps, onOpenApps }: AppsCardProps): JSX.Element {
+  const { info, error } = apps
 
   // 용량을 보고하지 않는 앱이 많아서, 합계는 '알려진 것만'이라는 걸 밝혀둔다
   const summary = info ? summarizeApps(info.apps) : null

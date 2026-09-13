@@ -1,5 +1,6 @@
 import { useEffect, useState, type JSX } from 'react'
 import type { Settings } from '@shared/types'
+import { useApps } from '@/hooks/useApps'
 import { useScan } from '@/hooks/useScan'
 import { applyTheme } from '@/lib/theme'
 import AppsPage from '@/pages/AppsPage'
@@ -13,7 +14,7 @@ type View = 'dashboard' | 'plan' | 'trash' | 'settings' | 'apps'
 /**
  * 화면은 다섯뿐이라 라우터 없이 상태 하나로 고른다.
  *
- * 스캔 결과·설정·API 키 유무는 화면을 오가도 살아 있어야 하므로 여기서 들고 있는다.
+ * 스캔 결과·설정·API 키 유무·설치된 앱 목록은 화면을 오가도 살아 있어야 하므로 여기서 들고 있는다.
  * (계획 화면은 스캔 결과의 scannedAt 으로 main 의 목록과 같은 스캔인지 확인한다)
  */
 export default function App(): JSX.Element {
@@ -21,6 +22,7 @@ export default function App(): JSX.Element {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null)
   const scan = useScan()
+  const apps = useApps()
 
   useEffect(() => {
     let alive = true
@@ -69,7 +71,7 @@ export default function App(): JSX.Element {
   }
 
   if (view === 'apps') {
-    return <AppsPage onBack={() => setView('dashboard')} />
+    return <AppsPage apps={apps} onBack={() => setView('dashboard')} />
   }
 
   if (view === 'settings') {
@@ -92,6 +94,7 @@ export default function App(): JSX.Element {
       onOpenPlan={() => setView('plan')}
       onOpenTrash={() => setView('trash')}
       onOpenSettings={() => setView('settings')}
+      apps={apps}
       onOpenApps={() => setView('apps')}
     />
   )
