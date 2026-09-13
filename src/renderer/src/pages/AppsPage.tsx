@@ -193,11 +193,12 @@ export default function AppsPage({ onBack }: AppsPageProps): JSX.Element {
             </div>
           )}
 
+          {/* 시작 프로그램은 개수만 센다. 켜고 끄기는 레지스트리에 써야 해서 이 앱의 범위 밖이다 (CLAUDE.md) */}
           {info && info.startup.length > 0 && (
             <p className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
               <Power className="size-3.5" />
-              시작 프로그램 {formatCount(info.startup.length)}개는 다음 단계에서 다룹니다. 켜고 끄기는 아직
-              없습니다.
+              시작 프로그램 {formatCount(info.startup.length)}개. 켜고 끄기는 이 앱에서 하지 않습니다 — 작업
+              관리자의 &lsquo;시작 앱&rsquo;에서 합니다.
             </p>
           )}
         </div>
