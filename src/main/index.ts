@@ -17,6 +17,8 @@ function createWindow(theme: Theme): void {
     show: false,
     autoHideMenuBar: true,
     title: 'PC 정리 도구',
+    // 패키징된 앱은 exe 에 박힌 아이콘(build/icon.ico)을 윈도우가 알아서 쓴다. 개발 모드에서만 파일로 준다
+    ...(app.isPackaged ? {} : { icon: join(__dirname, '../../build/icon.ico') }),
     // 창이 다른 색으로 번쩍였다가 테마 색이 되는 걸 막는다
     backgroundColor: WINDOW_BACKGROUND[theme],
     webPreferences: {

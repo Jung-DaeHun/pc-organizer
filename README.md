@@ -53,9 +53,32 @@ npm run verify     # 위 네 가지를 한 번에 (커밋 전 검사와 같은 �
 npm run package    # 설치 파일 생성 (release/pc-organizer-setup-<버전>.exe)
 ```
 
-설치 파일은 NSIS(설치 폴더 선택 가능, 현재 사용자 전용, 관리자 권한 없음)이고 **코드 서명이 없다** — 다른 PC 에서는
-SmartScreen 이나 스마트 앱 컨트롤이 막을 수 있다. 설치본과 `npm run dev` 는 같은 `%APPDATA%\pc-organizer` 를 쓴다
-(설정·API 키·저널이 공유된다).
+설치 파일은 NSIS(설치 폴더 선택 가능, 현재 사용자 전용, 관리자 권한 없음)다. 설치본과 `npm run dev` 는 같은
+`%APPDATA%\pc-organizer` 를 쓴다(설정·API 키·저널이 공유된다).
+
+### 아이콘
+
+`build/icon.ico`(16–256px, PNG 항목)와 `build/icon.png`(256px)는 `build/icon.svg` 에서 만든다 — 파랑→남색 둥근
+사각형 위에 흰 폴더, 오른쪽 위 노란 반짝임. 다시 만들려면 `@resvg/resvg-js` 로 크기별 PNG 를 그리고 `png-to-ico` 로
+묶는다(프로젝트 의존성이 아니라 일회성 스크립트로 돌린다). 패키징된 앱은 exe 에 박힌 이 아이콘을 쓰고, 개발 모드는
+`index.ts` 가 파일로 지정한다.
+
+### 코드 서명
+
+저장소에는 인증서가 없고 설정에도 서명 항목이 없다. 서명은 환경 변수 두 개로 켠다 — 있으면 electron-builder 가
+앱 exe·설치 파일·제거 프로그램을 `signtool` 로 서명하고 DigiCert 타임스탬프를 찍는다:
+
+```powershell
+$env:WIN_CSC_LINK = 'C:\path\to\cert.pfx'   # PKCS#12 파일 (경로 · URL · base64 모두 됨)
+$env:CSC_KEY_PASSWORD = '...'
+npm run package
+Get-AuthenticodeSignature release\pc-organizer-setup-0.1.0.exe   # Status 가 Valid 여야 한다
+```
+
+인증서·개인 키(`*.pfx`·`*.p12`·`*.key`)는 `.gitignore` 에 있어 커밋되지 않는다. **자체 서명 인증서는 다른 PC 에서
+아무 소용이 없다** — 신뢰된 루트가 아니라 SmartScreen·스마트 앱 컨트롤은 서명 없는 것과 똑같이 본다(파이프라인
+검증용으로만 쓴다). 신뢰되는 서명은 CA 가 발급한 OV/EV 인증서나 Azure Trusted Signing(electron-builder 의
+`win.azureSignOptions`)이 필요하다. 지금 배포본은 **서명이 없다**.
 
 Windows 전용이다. 드라이브 용량·설치된 앱 목록·드라이브별 휴지통 한도를 Windows에 기본 탑재된
 PowerShell로 조회한다. 전부 조회뿐이고 레지스트리에 쓰는 코드는 없다.

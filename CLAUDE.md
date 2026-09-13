@@ -17,6 +17,8 @@ npm test                                 # Vitest 1회 실행
 npm run build                            # typecheck + electron-vite build
 npm run package                          # 설치 파일 생성 (release/pc-organizer-setup-<버전>.exe, NSIS)
 npm run package:dir                      # 설치 파일 없이 압축 안 한 폴더만 (release/win-unpacked/ — 스모크 테스트용)
+                                         # 코드 서명은 WIN_CSC_LINK(pfx) + CSC_KEY_PASSWORD 환경 변수가 있을 때만 (README)
+                                         # 인증서 파일은 저장소에 넣지 않는다 (.gitignore *.pfx *.p12 *.key)
 
 npx vitest run tests/scanner.test.ts     # 파일 하나만
 npx vitest run -t "클라우드 전용"          # 이름으로 고르기
