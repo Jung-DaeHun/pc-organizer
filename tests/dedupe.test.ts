@@ -258,7 +258,8 @@ function fakeTrashIo(trashDir: string): { io: ExecutorIo; trashed: string[] } {
 const roomyRecycleBin: RecycleBinLookup = async () => ({
   maxBytes: 1024 * 1024 * 1024,
   bypassed: false,
-  usedBytes: 0
+  usedBytes: 0,
+  mountPoints: []
 })
 
 /** 임시 루트에 같은 내용 사본들을 만들고 scan 모듈 흉내를 그 그룹으로 채운다 */
@@ -435,7 +436,7 @@ describe('executeTrashApproved — 실제 파일시스템', () => {
     const asked: string[] = []
     const tightRecycleBin: RecycleBinLookup = async (volumeRoot) => {
       asked.push(volumeRoot)
-      return { maxBytes: 70_000, bypassed: false, usedBytes: 0 }
+      return { maxBytes: 70_000, bypassed: false, usedBytes: 0, mountPoints: [] }
     }
     const opened: string[] = []
     const spyHashIo = {
@@ -476,7 +477,7 @@ describe('executeTrashApproved — 실제 파일시스템', () => {
     const { io, trashed } = fakeTrashIo(trashDir)
     // 이번에 보낼 양 = 70,000 × 2 + 3,000 = 143,000. 파일 하나는 한도(200,000) 아래지만 이미 57,000 이 들어 있다.
     // 실제 윈도우라면 셋 다 휴지통에 들어간 뒤 탐색기가 오래된 것부터 영구 삭제했을 것이다 (2026-09-13 실측)
-    const nearlyFull: RecycleBinLookup = async () => ({ maxBytes: 200_000, bypassed: false, usedBytes: 57_000 })
+    const nearlyFull: RecycleBinLookup = async () => ({ maxBytes: 200_000, bypassed: false, usedBytes: 57_000, mountPoints: [] })
     const opened: string[] = []
     const spyHashIo = {
       lstat: NODE_HASH_IO.lstat,

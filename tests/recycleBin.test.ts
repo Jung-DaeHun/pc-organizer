@@ -4,6 +4,8 @@ import {
   createRecycleBinLookup,
   driveLetterOf,
   measureRecycleBinUsage,
+  mountPointOf,
+  mountPointsUnder,
   parseRecycleBinPolicy,
   type RawRecycleBinPolicy,
   type RecycleBinDirent,
@@ -28,7 +30,9 @@ const typical: RawRecycleBinPolicy = {
   NoRecycleFilesMachine: null,
   RecycleBinSizeUser: null,
   RecycleBinSizeMachine: null,
-  Sid: 'S-1-5-21-1111-2222-3333-1001'
+  Sid: 'S-1-5-21-1111-2222-3333-1001',
+  // Win32_MountPoint 는 드라이브 루트 자신도 마운트 폴더로 나열한다 (이 머신: C:\ 하나)
+  MountPoints: ['C:\\']
 }
 
 describe('parseRecycleBinPolicy', () => {
@@ -79,6 +83,57 @@ describe('driveLetterOf', () => {
     expect(driveLetterOf('C:\\Users')).toBeNull()
     // 드라이브 문자 하나만 스크립트에 끼워 넣으므로 여기서 걸러진 문자열은 PowerShell 에 닿지 않는다
     expect(driveLetterOf("C:'; Remove-Item x")).toBeNull()
+  })
+})
+
+// 드라이브 문자 없이 폴더에 마운트된 볼륨은 휴지통(`$Recycle.Bin`·BitBucket 한도)이 자기 것이라, 그 아래 경로를
+// 드라이브 루트의 설정으로 판정하면 한도와 사용량이 둘 다 틀린다. 그런 경로는 "모른다"로 둔다
+describe('mountPointsUnder', () => {
+  it('루트 아래 마운트 폴더만, 끝 구분자 없이 — 루트 자신과 다른 드라이브는 뺀다', () => {
+    const all = ['C:\\', 'D:\\', 'C:\\Data\\', 'C:\\Data\\Deep', 'D:\\Backup\\', 'c:\\mnt/x/']
+    expect(mountPointsUnder('C:\\', all)).toEqual(['C:\\Data', 'C:\\Data\\Deep', 'c:\\mnt/x'])
+    expect(mountPointsUnder('D:\\', all)).toEqual(['D:\\Backup'])
+    expect(mountPointsUnder('E:\\', all)).toEqual([])
+  })
+
+  it('대소문자가 달라도 같은 루트로 본다', () => {
+    expect(mountPointsUnder('c:\\', ['C:\\', 'C:\\Data'])).toEqual(['C:\\Data'])
+  })
+
+  it('ConvertTo-Json 이 문자열 하나로 줘도 배열로 읽는다', () => {
+    expect(mountPointsUnder('C:\\', 'C:\\')).toEqual([])
+    expect(mountPointsUnder('C:\\', 'C:\\Data')).toEqual(['C:\\Data'])
+  })
+
+  it('조회 실패(null·undefined)나 이상한 항목이 섞이면 null — 목록을 믿을 수 없으면 모른다', () => {
+    expect(mountPointsUnder('C:\\', null)).toBeNull()
+    expect(mountPointsUnder('C:\\', undefined)).toBeNull()
+    expect(mountPointsUnder('C:\\', ['C:\\', null])).toBeNull()
+    expect(mountPointsUnder('C:\\', ['C:\\', 42])).toBeNull()
+    expect(mountPointsUnder('C:\\', { Name: 'C:\\' })).toBeNull()
+  })
+})
+
+describe('mountPointOf', () => {
+  const mounts = ['C:\\Data', 'C:\\mnt\\x']
+
+  it('마운트 폴더 안(자신 포함)의 경로는 그 폴더를, 아니면 null', () => {
+    expect(mountPointOf('C:\\Data\\photos\\a.jpg', mounts)).toBe('C:\\Data')
+    expect(mountPointOf('C:\\Data', mounts)).toBe('C:\\Data')
+    expect(mountPointOf('C:\\mnt\\x\\y', mounts)).toBe('C:\\mnt\\x')
+    expect(mountPointOf('C:\\Users\\me\\a.jpg', mounts)).toBeNull()
+    expect(mountPointOf('C:\\a.jpg', [])).toBeNull()
+  })
+
+  it('접두만 같은 형제 폴더(`C:\\Data2`)는 마운트 안이 아니다', () => {
+    expect(mountPointOf('C:\\Data2\\a.jpg', mounts)).toBeNull()
+    expect(mountPointOf('C:\\DataBase', mounts)).toBeNull()
+  })
+
+  it('대소문자와 슬래시 방향이 달라도 같은 폴더로 본다', () => {
+    expect(mountPointOf('c:\\data\\A.JPG', mounts)).toBe('C:\\Data')
+    expect(mountPointOf('C:/Data/a.jpg', mounts)).toBe('C:\\Data')
+    expect(mountPointOf('C:\\Data\\a.jpg', ['C:\\Data\\'])).toBe('C:\\Data\\')
   })
 })
 
@@ -217,11 +272,34 @@ describe('createRecycleBinLookup', () => {
 
   it('한도는 PowerShell 에서, 사용량은 <root>$Recycle.Bin\\<SID> 에서 — 둘을 합친다', async () => {
     const { lookup, scripts, io } = lookupWith(typical)
-    expect(await lookup('C:\\')).toEqual({ maxBytes: 49_685 * MIB, bypassed: false, usedBytes: 3000 })
+    expect(await lookup('C:\\')).toEqual({
+      maxBytes: 49_685 * MIB,
+      bypassed: false,
+      usedBytes: 3000,
+      mountPoints: []
+    })
     expect(io.reads).toEqual([BIN])
     // 스크립트에 끼워 넣는 것은 드라이브 문자 하나뿐
     expect(scripts).toHaveLength(1)
     expect(scripts[0]).toContain("DriveLetter='C:'")
+    // 마운트 폴더 목록은 같은 조회에서 한 번에 (조회만)
+    expect(scripts[0]).toContain('Win32_MountPoint')
+  })
+
+  it('루트 아래에 다른 볼륨이 마운트돼 있으면 그 폴더를 같이 돌려준다 — 그 아래 경로는 호출부가 모른다로 다룬다', async () => {
+    const { lookup } = lookupWith({ ...typical, MountPoints: ['C:\\', 'C:\\Data\\', 'D:\\'] })
+    expect(await lookup('C:\\')).toEqual({
+      maxBytes: 49_685 * MIB,
+      bypassed: false,
+      usedBytes: 3000,
+      mountPoints: ['C:\\Data']
+    })
+  })
+
+  it('마운트 폴더 목록을 못 읽었으면 null — 어느 경로가 다른 볼륨인지 모르면 전부 모른다', async () => {
+    const { lookup, io } = lookupWith({ ...typical, MountPoints: null })
+    expect(await lookup('C:\\')).toBeNull()
+    expect(io.reads).toEqual([])
   })
 
   it('드라이브 문자가 없는 루트는 PowerShell 을 부르지도 않고 null', async () => {
@@ -251,7 +329,7 @@ describe('createRecycleBinLookup', () => {
 
   it("'휴지통을 쓰지 않음' 이면 사용량과 무관하게 막히므로 재지 않는다", async () => {
     const { lookup, io } = lookupWith({ ...typical, NukeOnDelete: 1 })
-    expect(await lookup('C:\\')).toEqual({ maxBytes: 49_685 * MIB, bypassed: true, usedBytes: 0 })
+    expect(await lookup('C:\\')).toEqual({ maxBytes: 49_685 * MIB, bypassed: true, usedBytes: 0, mountPoints: [] })
     expect(io.reads).toEqual([])
   })
 
@@ -262,6 +340,6 @@ describe('createRecycleBinLookup', () => {
 
   it('휴지통 폴더가 없는 볼륨은 사용량 0', async () => {
     const { lookup } = lookupWith(typical, fakeFs(BIN, null))
-    expect(await lookup('C:\\')).toEqual({ maxBytes: 49_685 * MIB, bypassed: false, usedBytes: 0 })
+    expect(await lookup('C:\\')).toEqual({ maxBytes: 49_685 * MIB, bypassed: false, usedBytes: 0, mountPoints: [] })
   })
 })

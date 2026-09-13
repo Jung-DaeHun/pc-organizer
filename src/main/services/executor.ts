@@ -23,7 +23,7 @@ import { formatBytes } from '@shared/format'
 import { isCloudOnly } from '../lib/cloudOnly'
 import { hashFull, type HashIo } from '../lib/hash'
 import { pathKey } from '../lib/paths'
-import type { RecycleBinLookup, RecycleBinPolicy } from '../lib/recycleBin'
+import { mountPointOf, type RecycleBinLookup, type RecycleBinPolicy } from '../lib/recycleBin'
 
 /**
  * 정리 계획을 실제로 옮기는 실행기. **이 앱에서 사용자 파일을 움직이거나 휴지통으로 보내는 유일한 로직**이다.
@@ -440,7 +440,9 @@ async function checkTrashItem(
  * 영구 삭제하므로 일부만 보내는 선택지는 없다(어느 것이 밀려날지 앱이 정할 수 없다).
  *
  * 볼륨마다 한 번만 조회한다. 드라이브 문자가 없는 경로(UNC 등)와 조회 실패는 '모른다' 이고, 모르면
- * 보내지 않는다 — trashItem 이 그런 볼륨에서 무엇을 하는지 확인할 길이 없다.
+ * 보내지 않는다 — trashItem 이 그런 볼륨에서 무엇을 하는지 확인할 길이 없다. 드라이브 루트 아래 폴더에
+ * 마운트된 **다른 볼륨**의 파일도 '모른다' — 경로는 `C:\…` 지만 휴지통은 그 볼륨의 것이라 `C:\` 의 한도·
+ * 사용량이 맞지 않는다(lib/recycleBin.ts). 루트의 설정이 그 파일에는 해당하지 않으므로 '안 씀' 보다 먼저 본다.
  */
 async function checkRecycleBin(jobs: readonly TrashJob[], lookup: RecycleBinLookup): Promise<TrashResult[]> {
   const problems: TrashResult[] = []
@@ -455,8 +457,11 @@ async function checkRecycleBin(jobs: readonly TrashJob[], lookup: RecycleBinLook
       const key = pathKey(root)
       if (!policies.has(key)) policies.set(key, await lookup(root))
       const policy = policies.get(key) ?? null
+      const mount = policy === null ? null : mountPointOf(item.path, policy.mountPoints)
 
       if (policy === null) problems.push(trashFail(item, 'recycle-bin-unknown'))
+      else if (mount !== null)
+        problems.push(trashFail(item, 'recycle-bin-unknown', `${mount} 에 마운트된 다른 볼륨의 파일`))
       else if (policy.bypassed) problems.push(trashFail(item, 'recycle-bin-off'))
       else if (job.group.size >= policy.maxBytes) problems.push(trashFail(item, 'exceeds-recycle-bin'))
       else {

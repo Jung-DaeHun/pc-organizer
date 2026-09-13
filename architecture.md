@@ -146,7 +146,9 @@ JSON이라 읽을 때 원소 모양까지 검사한다(`isEntry`). `undo.ts`는 
 부른다. 전부 조회 전용이고, 실패하면 예외 대신 `null`을 돌려준다(카드 하나가 비는 게 앱이 죽는 것보다 낫다 —
 휴지통 설정은 `null`이면 "모른다 = 보내지 않는다"). 휴지통의 현재 사용량은 PowerShell이 아니라
 `lib/recycleBin.ts`의 `measureRecycleBinUsage`가 `<root>$Recycle.Bin\<SID>`를 `readdir`·`lstat`으로 읽는다
-(SID는 한도 조회에 같이 실려 오고 `S-1-…` 모양만 경로에 쓴다). Shell COM의 휴지통 열거는 쓰지 않는다 — 그
+(SID는 한도 조회에 같이 실려 오고 `S-1-…` 모양만 경로에 쓴다). 같은 조회가 `Win32_MountPoint`의 마운트 폴더
+목록도 실어 온다 — 드라이브 문자 없이 폴더에 마운트된 볼륨은 휴지통이 자기 것이라, 그 아래 파일은
+`recycle-bin-unknown`으로 막는다(`mountPointOf`). Shell COM의 휴지통 열거는 쓰지 않는다 — 그
 열거 자체가 한도 초과분 밀어내기를 트리거할 가능성을 배제하지 못했다. `drives.ts`는 PowerShell이 막힌 환경을 위해 `fs.statfs`
 대비책을 가지고 있다. `ConvertTo-Json`은 항목이 하나면 배열이 아닌 객체를 내므로 `toArray()`로 받는다.
 

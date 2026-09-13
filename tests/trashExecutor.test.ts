@@ -153,7 +153,7 @@ const codes = (results: TrashResult[]): Record<string, string | undefined> =>
   Object.fromEntries(results.map((r) => [r.path, r.code]))
 
 /** 넉넉한 휴지통 — 대부분의 테스트는 휴지통 설정이 걸림돌이 아니어야 한다 */
-const ROOMY: RecycleBinPolicy = { maxBytes: 1024 * 1024 * 1024, bypassed: false, usedBytes: 0 }
+const ROOMY: RecycleBinPolicy = { maxBytes: 1024 * 1024 * 1024, bypassed: false, usedBytes: 0, mountPoints: [] }
 
 /** 볼륨 루트마다 정한 설정을 돌려주고, 무엇을 몇 번 물었는지 남긴다 */
 function recycleBin(byRoot: Record<string, RecycleBinPolicy | null> = { 'C:\\': ROOMY }): {
@@ -388,6 +388,34 @@ describe('preflightTrash', () => {
         'C:\\big1.bin': 'recycle-bin-unknown'
       })
       expect(d.opened).toEqual([])
+    })
+
+    // 드라이브 문자 없이 폴더에 마운트된 볼륨은 휴지통이 자기 것이라 C:\ 의 한도·사용량으로 판정하면 틀린다.
+    // 스캐너는 마운트 포인트를 내려가지 않지만 스캔 루트를 그 안으로 잡으면 닿는다 (lib/recycleBin.ts)
+    it('드라이브 아래 폴더에 마운트된 다른 볼륨의 파일은 recycle-bin-unknown — 루트의 설정이 해당하지 않는다', async () => {
+      const mounted: TrashPlan = {
+        ...plan,
+        groups: [group('0', SAME.length, ['C:\\a\\x.pdf', 'C:\\Data\\x.pdf', 'C:\\Data2\\x.pdf', 'c:\\data\\sub\\x.pdf'])]
+      }
+      const d = disk({ 'C:\\Data\\x.pdf': SAME, 'C:\\Data2\\x.pdf': SAME, 'c:\\data\\sub\\x.pdf': SAME })
+      // 루트 자체는 휴지통을 안 쓰는 설정이어도 마운트된 볼륨의 파일에는 그 판정을 붙이지 않는다
+      const rb = recycleBin({ 'C:\\': { ...ROOMY, mountPoints: ['C:\\Data'] } })
+      const jobs = resolveTrash(mounted, [{ groupId: '0', keepId: '0.0' }])
+      const problems = await preflightTrash(jobs, d.hashIo, rb.lookup)
+      expect(codes(problems)).toEqual({
+        'C:\\Data\\x.pdf': 'recycle-bin-unknown',
+        'c:\\data\\sub\\x.pdf': 'recycle-bin-unknown'
+      })
+      expect(problems.every((p) => p.error?.includes('C:\\Data'))).toBe(true)
+      expect(rb.asked).toEqual(['C:\\'])
+      expect(d.opened).toEqual([])
+
+      const off = recycleBin({ 'C:\\': { ...ROOMY, bypassed: true, mountPoints: ['C:\\Data'] } })
+      expect(codes(await preflightTrash(jobs, d.hashIo, off.lookup))).toEqual({
+        'C:\\Data\\x.pdf': 'recycle-bin-unknown',
+        'C:\\Data2\\x.pdf': 'recycle-bin-off',
+        'c:\\data\\sub\\x.pdf': 'recycle-bin-unknown'
+      })
     })
 
     it('볼륨마다 따로 본다 — 걸린 볼륨의 파일만 그 이유로 막힌다', async () => {

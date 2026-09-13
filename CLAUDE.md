@@ -78,6 +78,11 @@ npx vitest                               # watch 모드
 볼륨 키는 `pathKey`로 접는다(`C:\`와 `c:\`가 갈리면 합계가 쪼개진다). `trashItem`을 이 검사 없이 부르는 경로를
 만들지 않는다.
 
+휴지통은 **볼륨마다** 따로라, 드라이브 문자 없이 폴더에 마운트된 볼륨(`C:\Data`에 붙은 별도 디스크)의 파일은 경로가
+`C:\…`여도 `C:\`의 한도·사용량이 맞지 않는다. 같은 조회가 `Win32_MountPoint`의 마운트 폴더 목록을 함께 읽어
+`RecycleBinPolicy.mountPoints`로 넘기고, `checkRecycleBin`이 `mountPointOf`로 그 아래 파일을 `recycle-bin-unknown`으로
+막는다(그 볼륨의 휴지통은 조회하지 않는다 — 모른다). 목록을 못 읽으면 그 루트 전체가 모른다.
+
 `userData` 아래 쓰기는 `store.ts`(`settings.json`·`secrets.json`)와 `journal.ts`(`journal.json`)만.
 레지스트리는 조회만 한다(`Set-ItemProperty` / `Remove-Item` / `New-Item` 금지).
 
@@ -217,11 +222,12 @@ git에는 걸리지 않는다.
 휴지통 실행취소는 안내만 한다("윈도우 휴지통에서 복원"). 앱이 휴지통에서 꺼내는 코드는 없고 앞으로도
 넣지 않는다.
 
-B3에서 확인이 남은 것(2026-09-13 리뷰의 의심 — 배치 합계는 같은 날 실측으로 확인해 `recycle-bin-full`로 막았다):
+B3에서 확인이 남은 것(2026-09-13 리뷰의 의심 — 배치 합계는 같은 날 실측으로 확인해 `recycle-bin-full`로 막았고,
+드라이브 문자 없는 볼륨 마운트 포인트는 `Win32_MountPoint` 목록으로 `recycle-bin-unknown` 처리했다):
 
-- **드라이브 문자 없는 볼륨 마운트 포인트** — `C:\Data`에 마운트된 별도 볼륨의 파일이 `C:\` 정책으로
-  판정된다. 스캐너가 정션(마운트 포인트도 같은 reparse 태그)을 내려가지 않아 보통 닿지 않지만, 스캔
-  루트를 그 안으로 잡으면 닿는다. `Win32_Volume`에서 `DriveLetter` 없이 `Name`이 경로 접두인 볼륨이
-  있으면 `recycle-bin-unknown`으로 막는 게 가장 싼 방어다.
+- **OneDrive placeholder가 휴지통 사용량에서 빠지는지** — 윈도우의 `readdir(withFileTypes)`는 모든 reparse point를
+  `isSymbolicLink()`로 보고한다(정션은 확인). 클라우드 전용 placeholder도 reparse point면 휴지통 속 `$R`
+  placeholder가 0으로 세어져 사용량이 과소계산된다. 같은 기제가 `scanner.ts`에도 걸린다. 실측이 필요하다
+  (placeholder를 만들어야 해서 사용자 손이 필요).
 
 그 다음: 규칙 편집 UI, 설치된 앱 제거 안내, 시작 프로그램 켜고 끄기.

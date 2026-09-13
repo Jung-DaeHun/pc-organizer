@@ -116,6 +116,9 @@ grep -n "from 'node:fs" src/main/services/executor.ts src/main/services/undo.ts 
   `driveLetterOf`가 검증한 드라이브 문자 하나뿐인가. 사용량(`measureRecycleBinUsage`)은 `readdir`·`lstat`만 쓰고,
   경로에 끼워 넣는 SID 는 `S-1-…` 모양만 받으며, 링크·정션을 따라가지 않고, 못 읽으면 `null`(모른다)인가.
   Shell COM(`Shell.Application`)으로 휴지통을 열거하는 코드가 생기면 의심(열거가 밀어내기를 트리거할 수 있다)
+- 드라이브 문자 없이 폴더에 마운트된 볼륨 — 같은 조회가 `Win32_MountPoint` 목록을 `mountPoints`로 넘기고(못 읽으면
+  루트 전체 `null`), `checkRecycleBin`이 `mountPointOf`로 그 아래 파일을 `recycle-bin-unknown`으로 막는가. 휴지통은
+  볼륨마다 따로라 `C:\` 의 한도·사용량으로 `C:\Data`(별도 볼륨)를 판정하면 틀린다
 - `preflightTrash`가 그룹의 **모든** 파일(남길 것 포함)을 `lstat`(존재·일반 파일·크기 동일·클라우드 전용 아님)한 뒤
   `hashFull`로 전체 해시를 비교하고, 하나라도 걸리면 `blocked`로 **아무것도 보내지 않는가**
 - `trashOne`이 보내기 직전에 남길 파일이 아직 있는지(`keeperIntact`) 다시 보는가 — 없으면 `keeper-missing`
