@@ -262,5 +262,6 @@ reparse point를 일반 파일로 보고하므로, dirent 가 링크라 해도 `
 기능 범위는 여기까지다. 남은 할 일은 없다 — 위 두 결정(시작 프로그램 · placeholder 실측)을 뒤집으려면 먼저 확인한다.
 
 패키징은 됐다(2026-09-14 — 아이콘 `build/icon.ico`, NSIS 설치 파일, 설치본 스모크 테스트까지). 코드 서명은 하지 않는다.
-남은 것은 **배포** — 절차와 미결 사항(라이선스 · 릴리스 노트 · SmartScreen 안내)은 `docs/release.md`. GitHub Release 는
-공개 동작이라 사용자가 진행하라고 한 뒤에만 올린다.
+**0.1.0 을 GitHub Release 로 올렸다**(2026-09-15, 태그 `v0.1.0`, MIT 라이선스). 절차와 다음 버전 올리는 법은
+`docs/release.md`, 릴리스 노트는 `docs/release-notes-<버전>.md`. GitHub Release 는 공개 동작이라 사용자가 진행하라고 한
+뒤에만 올린다. `docs/screenshot.png` 는 윈도우 사용자 이름을 가려 찍는다(방법은 `docs/release.md`).

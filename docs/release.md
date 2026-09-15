@@ -1,7 +1,9 @@
 # 배포 절차
 
 설치 파일을 만들어 GitHub Release 에 붙인다. 저장소는 공개(`Jung-DaeHun/pc-organizer`)이고 `gh` 로 로그인돼 있다.
-2026-09-14 기준 아직 릴리스·태그는 없다.
+2026-09-15 에 `v0.1.0` 을 올렸다(`https://github.com/Jung-DaeHun/pc-organizer/releases/tag/v0.1.0`, 첨부
+`pc-organizer-setup-0.1.0.exe` 113 MB). 올리기 전에 `npm run package` 로 새로 만들고 `release\win-unpacked` 를 Playwright 로
+띄워 스캔까지 되는지 봤다.
 
 ## 만들기
 
