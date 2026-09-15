@@ -40,6 +40,14 @@
 영구 삭제 호출(`unlink`·`rm`·휴지통 비우기)은 코드 어디에도 없다. 되돌릴 수 없는 동작은 버그 하나가
 곧바로 사용자 파일 손실이 되기 때문이다.
 
+## 설치
+
+[Releases](https://github.com/Jung-DaeHun/pc-organizer/releases/latest) 에서 `pc-organizer-setup-<버전>.exe` 를 받아
+실행한다. Windows 10/11 64비트. 관리자 권한 없이 현재 사용자 폴더에 설치된다.
+
+설치 파일에 **코드 서명이 없어** 실행할 때 경고가 뜬다. SmartScreen 의 "Windows 의 PC 보호" 창은 **추가 정보 → 실행**으로
+넘어간다. **스마트 앱 컨트롤이 켜진 PC**(Windows 11 새 설치 기본)에서는 우회 버튼 없이 막히므로 실행할 수 없다.
+
 ## 실행
 
 ```bash
@@ -56,7 +64,7 @@ npm run package    # 설치 파일 생성 (release/pc-organizer-setup-<버전>.e
 설치 파일은 NSIS(설치 폴더 선택 가능, 현재 사용자 전용, 관리자 권한 없음)다. 설치본과 `npm run dev` 는 같은
 `%APPDATA%\pc-organizer` 를 쓴다(설정·API 키·저널이 공유된다).
 
-배포(GitHub Release 에 설치 파일 첨부)와 받는 쪽이 겪는 SmartScreen 경고, 올리기 전 미결 사항은 `docs/release.md` 에 있다.
+배포 절차(GitHub Release 에 설치 파일 첨부)는 `docs/release.md`, 버전별 릴리스 노트는 `docs/release-notes-<버전>.md` 에 있다.
 
 ### 아이콘
 
@@ -222,3 +230,7 @@ SDK import는 `lib/anthropic.ts` 한 곳으로 ESLint가 제한하고, 서비스
 
 Electron 44 · React 19 · TypeScript · Vite 7 (electron-vite) · Tailwind CSS 4 · Vitest ·
 Anthropic SDK + zod (AI 추천, main 프로세스에서만)
+
+## 라이선스
+
+MIT — `LICENSE` 참고.

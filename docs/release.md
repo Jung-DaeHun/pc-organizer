@@ -38,10 +38,14 @@ gh release create v0.1.0 "release\pc-organizer-setup-0.1.0.exe" --title "PC 정�
   "이 경우 실행 불가" 라고 적는다.
 - 브라우저 다운로드에도 "일반적으로 다운로드되지 않음" 경고가 붙을 수 있다.
 
-## 올리기 전에 정할 것 (2026-09-14 미결)
+## 올리기 전에 정한 것 (2026-09-15)
 
-1. **라이선스** — 저장소에 LICENSE 가 없다. 공개 저장소에 실행 파일까지 올리면 사람들이 쓰게 되니 하나 정한다(MIT 등).
-2. **릴리스 노트** — 무엇을 하는 앱인지, 영구 삭제 없음, AI 기능은 API 키 선택 사항, 위 SmartScreen 안내.
-3. `README.md` 의 `docs/screenshot.png` 가 현재 화면과 맞는지 (릴리스 페이지에서 README 가 첫 화면이다).
+1. **라이선스** — MIT (`LICENSE`, `package.json` 의 `license`). 파일 이름이 `LICENSE`(확장자 없음)라 electron-builder 의
+   NSIS 라이선스 페이지(`license.txt` 등을 찾는다)에는 걸리지 않는다 — 설치 화면은 그대로다.
+2. **릴리스 노트** — `docs/release-notes-<버전>.md`. 무엇을 하는 앱인지, 영구 삭제 없음, AI 기능은 API 키 선택 사항, 위
+   SmartScreen 안내. README 에도 "설치" 절로 같은 안내를 두었다(릴리스 페이지에서 README 가 첫 화면이다).
+3. `docs/screenshot.png` — 2026-09-15 에 다시 찍었다. 경로의 윈도우 사용자 이름은 화면에 두지 않는다 — Playwright 로
+   빌드된 `out/` 을 띄워 스캔한 뒤, 찍기 직전에 DOM 텍스트 노드의 사용자 이름(과 그 이름을 영문 자판으로 친 폴더 이름)을
+   `user`·`work` 로 바꾸고 `page.screenshot` 한다. 앱 코드에는 가리는 기능이 없다(앱은 실제 경로를 그대로 보여준다).
 
 릴리스는 공개 저장소에 올라가는 외부 공개 동작이라, 사용자가 "진행해" 라고 한 뒤에만 올린다.
