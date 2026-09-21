@@ -30,8 +30,8 @@ gh release create v0.1.0 "release\pc-organizer-setup-0.1.0.exe" --title "PC 정�
 ```
 
 `https://github.com/Jung-DaeHun/pc-organizer/releases/latest` 에서 내려받는다. 다음 버전은 `package.json` 의 `version` 을
-올리고 `npm run package` → 새 태그로 같은 절차. `release/latest.yml`·`.blockmap` 은 electron-updater 용이라 올리지 않는다
-(앱에 자동 업데이트가 없다).
+올리고 `npm run package` → 새 태그로 같은 절차 — 빠뜨리기 쉬운 것까지 체크리스트로 적은 것이 **`docs/nextversion.md`** 다.
+`release/latest.yml`·`.blockmap` 은 electron-updater 용이라 올리지 않는다(앱에 자동 업데이트가 없다).
 
 ## 받는 사람이 겪는 것 — 릴리스 노트와 README 에 적는다
 
